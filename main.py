@@ -41,7 +41,7 @@ def connect_wifi():
     print("\nTerhubung:", wlan.ifconfig())
     return wlan
 
-# === HALAMAN WEB (AUTO REFRESH) ===
+# === HALAMAN WEB DENGAN WAKTU & TANGGAL REALTIME ===
 def web_page(percent, mode_auto):
     pump_status = "MENYALA" if relay.value() == 0 else "MATI"
     mode_status = "Otomatis" if mode_auto else "Manual"
@@ -50,18 +50,33 @@ def web_page(percent, mode_auto):
     <html>
     <head>
         <title>Penyiram Otomatis</title>
-        <meta http-equiv="refresh" content="2">  <!-- REFRESH SETIAP 2 DETIK -->
+        <meta http-equiv="refresh" content="2">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link href="https://fonts.cdnfonts.com/css/rubik-2" rel="stylesheet">
         <style>
         body{{font-family:'Rubik', Arial, sans-serif;text-align:center;margin-top:40px; font-weight: bold;}}
-        button{{padding:10px 20px;margin:5px;font-size:16px;}}
-        .on{{background-color:black;color:white;border:none;}}
-        .off{{background-color:white;color:black;border:none;}}
+        button{{border: 1px dashed gray;border-radius: 0; padding:10px 20px;margin:5px;font-size:16px;}}
+        .on , .off {{color:black;border:1px dashed grey;}}
+        .on:hover, .off:hover {{background-color: #9AA4BA; border: 1px dashed gray; color:white;}}
+        #waktu{{font-size:18px; margin-bottom:10px;}}
         </style>
+
+        <script>
+        function updateTime() {{
+            const now = new Date();
+            const date = now.toLocaleDateString('id-ID');
+            const time = now.toLocaleTimeString('id-ID');
+            document.getElementById("waktu").innerHTML = date + " - " + time;
+        }}
+        setInterval(updateTime, 1000);
+        </script>
+
     </head>
-    <body>
+    <body onload="updateTime()">
         <h2>Penyiram Tanaman Otomatis</h2>
+
+        <p><b id="waktu"></b></p>
+
         <p>Kelembapan Tanah: <b>{percent}%</b></p>
         <p>Status Pompa: <b>{pump_status}</b></p>
         <p>Mode: <b>{mode_status}</b></p>
@@ -129,6 +144,7 @@ while True:
         conn.close()
 
     except OSError:
-        pass  # timeout agar loop tidak macet
+        pass  # timeout agar tidak menggantung
 
     sleep(1)
+
