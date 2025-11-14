@@ -1,0 +1,23 @@
+<html>
+    <head><title>Penyiram Otomatis</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.cdnfonts.com/css/rubik-2" rel="stylesheet">
+    <style>
+      body{font-family:'Rubik', Arial, sans-serif;text-align:center;margin-top:40px; font-weight: bold;}
+      button{padding:10px 20px;margin:5px;font-size:16px;}
+      .on{background-color:rgb(0, 0, 0);color:rgb(255, 255, 255);}
+      .off{background-color:rgb(255, 255, 255);color:rgb(0, 0, 0);}
+    </style>
+    </head>
+    <body>
+      <h2>Penyiram Tanaman Otomatis</h2>
+      <p>Kelembapan Tanah: <b>{percent}%</b></p>
+      <p>Status Pompa: <b>{pump_status}</b></p>
+      <p>Mode: <b>{mode_status}</b></p>
+      <form>
+        <button name="mode" value="auto">Mode Otomatis</button>
+        <button name="mode" value="manual">Mode Manual</button><br><br>
+        <button name="pump" value="on" class="on">Pompa ON</button>
+        <button name="pump" value="off" class="off">Pompa OFF</button>
+      </form>
+    </body></html>
