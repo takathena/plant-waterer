@@ -34,7 +34,7 @@ In order for this project to run, tools and code from this [repo](https://github
 
 ## Installation 
 
-0. Wiring The project like [This]()
+0. Wiring The project like [This (Text)](https://chatgpt.com/g/g-p-691dafb61bd881918b828a669f6e14ea-coding/c/691ea66a-acbc-8323-b407-e8907f30a673) or [Images (images)](https://drive.google.com/drive/folders/16fy6WLh_d3s6I2jmSO0OlUxH3bwt2FOe?usp=sharing)
 
 
 1. clone this repo to get the required assets
