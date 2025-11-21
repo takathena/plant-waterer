@@ -11,7 +11,7 @@ PASSWORD = ""
 soil = ADC(Pin(34))
 soil.atten(ADC.ATTN_11DB)
 relay = Pin(26, Pin.OUT)
-relay.value(1)  # relay off awal (aktif LOW)
+relay.value(1)  # Relay off awal (aktif LOW)
 
 # === NILAI KALIBRASI SENSOR ===
 SOIL_DRY = 3500
@@ -41,7 +41,7 @@ def connect_wifi():
     print("\nTerhubung:", wlan.ifconfig())
     return wlan
 
-# === HALAMAN WEB DENGAN WAKTU & TANGGAL REALTIME ===
+# === HALAMAN WEB ===
 def web_page(percent, mode_auto):
     pump_status = "MENYALA" if relay.value() == 0 else "MATI"
     mode_status = "Otomatis" if mode_auto else "Manual"
@@ -51,42 +51,22 @@ def web_page(percent, mode_auto):
     <head>
         <title>Penyiram Otomatis</title>
         <meta http-equiv="refresh" content="2">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <link href="https://fonts.cdnfonts.com/css/rubik-2" rel="stylesheet">
         <style>
-        body{{font-family:'Rubik', Arial, sans-serif;text-align:center;margin-top:40px; font-weight: bold;}}
-        button{{border: 1px dashed gray;border-radius: 0; padding:10px 20px;margin:5px;font-size:16px;}}
-        .on , .off {{color:black;border:1px dashed grey;}}
-        .on:hover, .off:hover {{background-color: #9AA4BA; border: 1px dashed gray; color:white;}}
-        #waktu{{font-size:18px; margin-bottom:10px;}}
+        body{{font-family:Arial;text-align:center;margin-top:30px;font-weight:bold;}}
+        button{{padding:10px 20px;margin:5px;font-size:16px;}}
         </style>
-
-        <script>
-        function updateTime() {{
-            const now = new Date();
-            const date = now.toLocaleDateString('id-ID');
-            const time = now.toLocaleTimeString('id-ID');
-            document.getElementById("waktu").innerHTML = date + " - " + time;
-        }}
-        setInterval(updateTime, 1000);
-        </script>
-
     </head>
-    <body onload="updateTime()">
+    <body>
         <h2>Penyiram Tanaman Otomatis</h2>
-
-        <p><b id="waktu"></b></p>
 
         <p>Kelembapan Tanah: <b>{percent}%</b></p>
         <p>Status Pompa: <b>{pump_status}</b></p>
         <p>Mode: <b>{mode_status}</b></p>
-
         <form>
             <button name="mode" value="auto">Mode Otomatis</button>
             <button name="mode" value="manual">Mode Manual</button><br><br>
-
-            <button name="pump" value="on" class="on">Pompa ON</button>
-            <button name="pump" value="off" class="off">Pompa OFF</button>
+            <button name="pump" value="on">Pompa ON</button>
+            <button name="pump" value="off">Pompa OFF</button>
         </form>
     </body>
     </html>
@@ -104,20 +84,20 @@ print("Server siap di http://%s" % wlan.ifconfig()[0])
 
 # === LOOP UTAMA ===
 while True:
-    # Baca sensor
+
     percent, raw = read_soil_percent()
     print("Soil:", percent, "% (ADC:", raw, ")")
 
-    # Kontrol otomatis
+    # === Kontrol otomatis dibalik ===
     if mode_auto:
-        if percent < 40:
+        if percent > 40:      # tanah BASAH → pompa HIDUP
             relay.value(0)
-        else:
+        else:                 # tanah KERING → pompa MATI
             relay.value(1)
     else:
         relay.value(manual_state)
 
-    # Layani request web
+    # === WEB REQUEST ===
     try:
         conn, addr = s.accept()
         request = str(conn.recv(1024))
@@ -129,7 +109,7 @@ while True:
         elif "mode=manual" in request:
             mode_auto = False
 
-        # MANUAL CONTROL
+        # POMPA MANUAL
         elif "pump=on" in request:
             manual_state = 0
             relay.value(0)
@@ -137,14 +117,13 @@ while True:
             manual_state = 1
             relay.value(1)
 
-        # KIRIM HALAMAN WEB
+        # KIRIM HTML
         html = web_page(percent, mode_auto)
         conn.send("HTTP/1.1 200 OK\nContent-Type: text/html\nConnection: close\n\n")
         conn.sendall(html)
         conn.close()
 
     except OSError:
-        pass  # timeout agar tidak menggantung
+        pass
 
     sleep(1)
-
