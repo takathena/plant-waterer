@@ -2,64 +2,74 @@ from machine import Pin, ADC
 import dht
 import time
 
-# ================================
+# ====================================
 # Konfigurasi Pin
-# ================================
-soil_pin = ADC(Pin(34))          # Soil moisture (ADC)
-soil_pin.atten(ADC.ATTN_11DB)    # Range 0–3.3V
+# ====================================
+soil_pin = ADC(Pin(34))
+soil_pin.atten(ADC.ATTN_11DB)      # 0–3.3V
 
-relay_pin = Pin(26, Pin.OUT)     # Relay untuk pompa
-relay_active_level = 0           # Relay aktif LOW (0 = ON)
+relay_pin = Pin(26, Pin.OUT)
+relay_active_level = 0             # Relay aktif LOW
 
-dht_pin = dht.DHT11(Pin(14))     # Sensor DHT11 untuk suhu
+dht_pin = dht.DHT11(Pin(14))
 
-# ================================
-# Ambang batas kelembapan tanah
-# ================================
-# Semakin tinggi nilai ADC → semakin kering
-SOIL_THRESHOLD = 2500            # Sesuaikan berdasarkan kalibrasi
+# ====================================
+# Kalibrasi Soil Moisture
+# GANTI nilai ini berdasarkan pengukuranmu
+# ====================================
+SOIL_WET = 1200     # ADC saat tanah basah
+SOIL_DRY = 3300     # ADC saat tanah kering
 
-# ================================
+# Threshold persen untuk penyiraman
+MOISTURE_THRESHOLD_PERCENT = 40    # <40% → kering
+
+# ====================================
 # Fungsi kontrol pompa
-# ================================
+# ====================================
 def pump_on():
     relay_pin.value(relay_active_level)
 
 def pump_off():
     relay_pin.value(1 - relay_active_level)
 
-# Mulai dengan pompa mati
 pump_off()
 
-# ================================
-# Loop utama
-# ================================
-while True:
-    # Baca soil moisture (ADC)
-    soil_value = soil_pin.read()
+# ====================================
+# Konversi ADC → Persen
+# ====================================
+def adc_to_percent(adc_value):
+    # Batasi agar tidak keluar rentang
+    if adc_value < SOIL_WET:
+        return 100
+    if adc_value > SOIL_DRY:
+        return 0
+    
+    percent = (SOIL_DRY - adc_value) * 100 / (SOIL_DRY - SOIL_WET)
+    return int(percent)
 
-    # Baca DHT11
+# ====================================
+# Loop utama
+# ====================================
+while True:
+    soil_adc = soil_pin.read()
+    soil_percent = adc_to_percent(soil_adc)
+
+    # Baca suhu
     try:
         dht_pin.measure()
         temperature = dht_pin.temperature()
     except:
         temperature = None
 
-    # Log ke serial
-    print("Soil ADC:", soil_value, "| Temperature:", temperature)
+    print("Soil:", soil_adc, "|", soil_percent, "% | Temperatur:", temperature)
 
-    # ================================
-    # Logika penyiraman otomatis
-    # ================================
-    # Sesuai permintaan:
-    # LEMBAB = soil_value < threshold → pompa MENYALA
-    # KERING = soil_value >= threshold → pompa MATI
-
-    if soil_value < SOIL_THRESHOLD:
-        print("Tanah Lembap → Pompa ON")
+    # Logika penyiraman
+    if soil_percent > MOISTURE_THRESHOLD_PERCENT:
+        print("Tanah Lembap → Pompa OFF")
         pump_on()
     else:
-        print("Tanah Kering → Pompa OFF")
+        print("Tanah Kering → Pompa ON")
         pump_off()
 
     time.sleep(2)
+
