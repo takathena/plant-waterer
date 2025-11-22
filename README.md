@@ -22,7 +22,7 @@ In order for this project to run, tools and code from this [repo](https://github
 #### Tools
 
 - ESP32
-- Water Pump
+- Water DC
 - Soil Sensor
 - Relay
 - Jumper Cable
