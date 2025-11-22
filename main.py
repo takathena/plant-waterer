@@ -5,7 +5,7 @@ import socket
 from machine import Pin, ADC
 from time import sleep
 import dht
-import ujson as json
+import ujson as json	
 
 # === KONFIG WIFI ===
 SSID = "gendis"
@@ -99,8 +99,8 @@ canvas{width:100%;height:160px;background:transparent;border-radius:8px;}
     <div class="controls">
       <button id="btnAuto" class="toggle">AUTO</button>
       <button id="btnManual" class="toggle" style="display:none;">MANUAL</button>
-      <button id="btnPumpOn">Pompa ON</button>
-      <button id="btnPumpOff">Pompa OFF</button>
+      <button id="btnPumpOn">Pompa OFF</button>
+      <button id="btnPumpOff">Pompa ON</button>
     </div>
   </div>
 
@@ -314,4 +314,3 @@ while True:
     except Exception as e:
         print('Server error', e)
     sleep(0.2)
-
