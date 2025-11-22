@@ -1,129 +1,65 @@
-import network
-import socket
 from machine import Pin, ADC
-from time import sleep
+import dht
+import time
 
-# === KONFIGURASI WIFI ===
-SSID = "Lab Telkom"
-PASSWORD = ""
+# ================================
+# Konfigurasi Pin
+# ================================
+soil_pin = ADC(Pin(34))          # Soil moisture (ADC)
+soil_pin.atten(ADC.ATTN_11DB)    # Range 0–3.3V
 
-# === INISIALISASI KOMPONEN ===
-soil = ADC(Pin(34))
-soil.atten(ADC.ATTN_11DB)
-relay = Pin(26, Pin.OUT)
-relay.value(1)  # Relay off awal (aktif LOW)
+relay_pin = Pin(26, Pin.OUT)     # Relay untuk pompa
+relay_active_level = 0           # Relay aktif LOW (0 = ON)
 
-# === NILAI KALIBRASI SENSOR ===
-SOIL_DRY = 3500
-SOIL_WET = 1500
+dht_pin = dht.DHT11(Pin(14))     # Sensor DHT11 untuk suhu
 
-# === VARIABEL MODE ===
-mode_auto = True
-manual_state = 1
+# ================================
+# Ambang batas kelembapan tanah
+# ================================
+# Semakin tinggi nilai ADC → semakin kering
+SOIL_THRESHOLD = 2500            # Sesuaikan berdasarkan kalibrasi
 
-# === FUNGSI BACA SENSOR ===
-def read_soil_percent():
-    val = soil.read()
-    percent = int((SOIL_DRY - val) * 100 / (SOIL_DRY - SOIL_WET))
-    percent = max(0, min(100, percent))
-    return percent, val
+# ================================
+# Fungsi kontrol pompa
+# ================================
+def pump_on():
+    relay_pin.value(relay_active_level)
 
-# === KONEKSI WIFI ===
-def connect_wifi():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    if not wlan.isconnected():
-        print("Menghubungkan ke WiFi...", end="")
-        wlan.connect(SSID, PASSWORD)
-        while not wlan.isconnected():
-            print(".", end="")
-            sleep(0.5)
-    print("\nTerhubung:", wlan.ifconfig())
-    return wlan
+def pump_off():
+    relay_pin.value(1 - relay_active_level)
 
-# === HALAMAN WEB ===
-def web_page(percent, mode_auto):
-    pump_status = "MENYALA" if relay.value() == 0 else "MATI"
-    mode_status = "Otomatis" if mode_auto else "Manual"
+# Mulai dengan pompa mati
+pump_off()
 
-    html = f"""
-    <html>
-    <head>
-        <title>Penyiram Otomatis</title>
-        <meta http-equiv="refresh" content="2">
-        <style>
-        body{{font-family:Arial;text-align:center;margin-top:30px;font-weight:bold;}}
-        button{{padding:10px 20px;margin:5px;font-size:16px;}}
-        </style>
-    </head>
-    <body>
-        <h2>Penyiram Tanaman Otomatis</h2>
-
-        <p>Kelembapan Tanah: <b>{percent}%</b></p>
-        <p>Status Pompa: <b>{pump_status}</b></p>
-        <p>Mode: <b>{mode_status}</b></p>
-        <form>
-            <button name="mode" value="auto">Mode Otomatis</button>
-            <button name="mode" value="manual">Mode Manual</button><br><br>
-            <button name="pump" value="on">Pompa ON</button>
-            <button name="pump" value="off">Pompa OFF</button>
-        </form>
-    </body>
-    </html>
-    """
-    return html
-
-# === MULAI SERVER ===
-wlan = connect_wifi()
-addr = socket.getaddrinfo("0.0.0.0", 80)[0][-1]
-s = socket.socket()
-s.bind(addr)
-s.listen(1)
-s.settimeout(0.5)
-print("Server siap di http://%s" % wlan.ifconfig()[0])
-
-# === LOOP UTAMA ===
+# ================================
+# Loop utama
+# ================================
 while True:
+    # Baca soil moisture (ADC)
+    soil_value = soil_pin.read()
 
-    percent, raw = read_soil_percent()
-    print("Soil:", percent, "% (ADC:", raw, ")")
-
-    # === Kontrol otomatis dibalik ===
-    if mode_auto:
-        if percent > 40:      # tanah BASAH → pompa HIDUP
-            relay.value(0)
-        else:                 # tanah KERING → pompa MATI
-            relay.value(1)
-    else:
-        relay.value(manual_state)
-
-    # === WEB REQUEST ===
+    # Baca DHT11
     try:
-        conn, addr = s.accept()
-        request = str(conn.recv(1024))
-        print("Web:", addr)
+        dht_pin.measure()
+        temperature = dht_pin.temperature()
+    except:
+        temperature = None
 
-        # MODE
-        if "mode=auto" in request:
-            mode_auto = True
-        elif "mode=manual" in request:
-            mode_auto = False
+    # Log ke serial
+    print("Soil ADC:", soil_value, "| Temperature:", temperature)
 
-        # POMPA MANUAL
-        elif "pump=on" in request:
-            manual_state = 0
-            relay.value(0)
-        elif "pump=off" in request:
-            manual_state = 1
-            relay.value(1)
+    # ================================
+    # Logika penyiraman otomatis
+    # ================================
+    # Sesuai permintaan:
+    # LEMBAB = soil_value < threshold → pompa MENYALA
+    # KERING = soil_value >= threshold → pompa MATI
 
-        # KIRIM HTML
-        html = web_page(percent, mode_auto)
-        conn.send("HTTP/1.1 200 OK\nContent-Type: text/html\nConnection: close\n\n")
-        conn.sendall(html)
-        conn.close()
+    if soil_value < SOIL_THRESHOLD:
+        print("Tanah Lembap → Pompa ON")
+        pump_on()
+    else:
+        print("Tanah Kering → Pompa OFF")
+        pump_off()
 
-    except OSError:
-        pass
-
-    sleep(1)
+    time.sleep(2)
