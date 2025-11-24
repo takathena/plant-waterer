@@ -5,11 +5,11 @@ import socket
 from machine import Pin, ADC
 from time import sleep
 import dht
-import ujson as json	
+import ujson as json
 
 # === KONFIG WIFI ===
-SSID = "gendis"
-PASSWORD = "sipwes00"
+SSID = "@Ruijie-sDFB6_iot"
+PASSWORD = "Iot@12345678"
 
 # === PERANGKAT ===
 soil = ADC(Pin(34))
@@ -145,7 +145,7 @@ async function fetchData(){
     document.getElementById('soilRaw').textContent = 'ADC: ' + j.soil_raw;
     document.getElementById('temp').textContent = (j.temp === null ? '--' : j.temp + '°C');
     document.getElementById('hum').textContent = 'Kelembapan Udara: ' + (j.hum === null ? '--' : j.hum + '%');
-    document.getElementById('pump').textContent = j.pump ? 'ON' : 'OFF';
+    document.getElementById('pump').textContent = j.pump ? 'OFF' : 'ON';
     document.getElementById('mode').textContent = 'Mode: ' + (j.mode ? 'AUTO' : 'MANUAL');
 
     // push to soil graph
