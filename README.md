@@ -83,7 +83,7 @@ Buka alamat tersebut di browser untuk mengakses UI yang menunjukkan data kelemba
 
 ## 🧪 Troubleshooting
 
-🔹 ESP32 tidak muncul di IDE?  
+🔹ESP32 tidak muncul di IDE?  
 🔹Periksa port USB  
 🔹Install driver board yang sesuai  
 🔹Dashboard tidak muncul?  
