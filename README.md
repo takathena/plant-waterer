@@ -1,52 +1,102 @@
+<div align="center">
+  
+# 🌿 Plant Waterer
 
-# Automatic Plant Waterer
+**Automated Plant Watering & Monitoring System**  
+📡 ESP32 + Soil Moisture Sensor + Web Dashboard
 
-Final semester assignment
+![ESP32](https://img.shields.io/badge/ESP32-IoT-blue)
+![Python](https://img.shields.io/badge/Python-MicroPython-yellow)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Status](https://img.shields.io/badge/Status-Active-success)
 
+</div>
 
-## Features
+---
 
-1. light code
-2. easy to use
-3. open source
-4. dashboard
-    - automatic & manual Mode
-    - soil chart realtime
-    - cross platform
-    - elegant design
+## 🚀 Project Overview
 
-## Requirements 
+**Plant Waterer** adalah sebuah proyek IoT yang dibuat sebagai tugas akhir untuk mengotomasi penyiraman tanaman.  
+Perangkat ini mampu memantau kelembapan tanah secara real-time dan menyiram tanaman secara otomatis — lengkap dengan dashboard visual yang bisa diakses lewat browser setelah terhubung ke Wi-Fi.
 
-In order for this project to run, tools and code from this [repo](https://github.com/takathena/plant-waterer) are required.
+---
 
-#### Tools
+## 🌟 Features
 
-- ESP32
-- Water Pump
-- Soil Sensor
-- Relay
-- Jumper Cable
+✨ **Automatic & Manual Watering Mode**  
+📊 Real-time soil moisture chart (200-500ms update)  
+📱 Cross-platform dashboard interface  
+🧠 Easy-to-use firmware on ESP32  
+📡 Accessible via local network IP  
+🔧 Customizable design & open-source codebase 
 
-#### Software
+---
 
-- Thonny / ArduinoIDE
-- Browser
+## 📋 Requirements
 
-## Installation 
+### 🔌 Hardware
+- ESP32 microcontroller  
+- Soil moisture sensor  
+- Relay module  
+- DC water pump  
+- Jumper cables  
+- Power supply
 
-0. Wiring The project like [This (Text)](https://chatgpt.com/g/g-p-691dafb61bd881918b828a669f6e14ea-coding/c/691ea66a-acbc-8323-b407-e8907f30a673) or [Images (images)](https://drive.google.com/drive/folders/16fy6WLh_d3s6I2jmSO0OlUxH3bwt2FOe?usp=sharing)
+### 💻 Software
+- Thonny (for Python / ESP32) *or* Arduino IDE  
+- Browser to access dashboard UI
 
+---
 
-1. clone this repo to get the required assets
-```bash 
-    git clone github.com/takathena/plant-waterer
+## 🛠 Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/takathena/plant-waterer
+2. Connect & flash firmware 
+    - Buka Thonny atau Arduino IDE  
+    - Hubungkan ESP32
+    - Upload main.py (Python/ESP32) atau sesuai firmware Anda
+3. Configure Wi-Fi  
+    Di dalam kode, sesuaikan:
+    ```
+    SSID = "your-wifi"
+    PASSWORD = "your-password"
+    ```
+4. Run & Access Dashboard
+    - Jalankan kode
+    - Catat IP yang muncul di konsol
+    - Buka IP tersebut di browser untuk melihat dashboard
+
+## 📊 Dashboard
+
+Setelah ESP32 berhasil terhubung ke Wi-Fi, perangkat akan menampilkan alamat IP.
+Buka alamat tersebut di browser untuk mengakses UI yang menunjukkan data kelembapan tanah secara real-time dan opsi watering otomatis/manual.
+
+## 📁 Repository Structure
+
 ```
-2. open thonny software and connect to ESP32
-3. change in according to the Wi-Fi you are using. Once you have run main.py on the ESP32, wait for the IP address to appear.
-```main.py
-SSID = "Hotspot-SMK"
-PASSWORD = ""
+.esp32
+├── boot.py
+└── main.py
 ```
-4. If you have clicked on the IP address, you will be directed to the browser you are using. Wait until the dashboard appears.
-5. The dashboard display will look like [this](https://github.com/takathena/plant-waterer)
-6. If the dashboard appears, it has been successful and can be used normally.
+
+## 🧪 Troubleshooting
+
+🔹 ESP32 tidak muncul di IDE?  
+🔹Periksa port USB  
+🔹Install driver board yang sesuai  
+🔹Dashboard tidak muncul?  
+🔹Pastikan ESP32 tersambung ke Wi-Fi yang sama dengan perangkat kamu  
+🔹Buka alamat IP yang muncul pada serial monitor
+
+## 🤝 Contributing
+
+Contributions are welcome!  
+Please read [CONTRIBUTING.md](https://github.com/takathena/plant-waterer/blob/CONTRIBUTING.md/) before submitting changes.
+
+## 📜 License
+
+This project is licensed under the This site was built using [LICENSE](https://github.com/takathena/plant-waterer/blob/simple/LICENSE). License.
+
+© 2025 Takathena
