@@ -17,7 +17,7 @@
 ## 🚀 Project Overview
 
 **Plant Waterer** adalah sebuah proyek IoT yang dibuat sebagai tugas akhir untuk mengotomasi penyiraman tanaman.  
-Perangkat ini mampu memantau kelembapan tanah secara real-time dan menyiram tanaman secara otomatis — lengkap dengan dashboard visual yang bisa diakses lewat browser setelah terhubung ke Wi-Fi.
+Perangkat ini mampu memantau kelembapan tanah secara real-time dan menyiram tanaman secara otomatis, lengkap dengan dashboard visual yang bisa diakses lewat browser setelah terhubung ke Wi-Fi.
 
 ---
 
