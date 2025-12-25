@@ -93,7 +93,7 @@ Buka alamat tersebut di browser untuk mengakses UI yang menunjukkan data kelemba
 ## 🤝 Contributing
 
 Contributions are welcome!  
-Please read [CONTRIBUTING.md](https://github.com/takathena/plant-waterer/blob/CONTRIBUTING.md/) before submitting changes.
+Please read [CONTRIBUTING.md](https://github.com/takathena/plant-waterer/blob/simple/CONTRIBUTING.md) before submitting changes.
 
 ## 📜 License
 
