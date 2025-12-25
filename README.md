@@ -1,6 +1,6 @@
 <div align="center">
   
-# 🌿 Automatic Plant Waterer
+# 🌿 Automatic Plant Waterer 🌿
 
 **Automated Plant Watering & Monitoring System**  
 📡 ESP32 + Soil Moisture Sensor + Web Dashboard
