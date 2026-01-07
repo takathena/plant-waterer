@@ -1,154 +1,469 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>IoT Dashboard</title>
-<style>
-:root{
-  --bg:#0f1115; --card:#111318; --muted:#9aa3b2; --accent:#39c0ff;
-}
-body{background:var(--bg); color:#e6eef6; font-family:Inter,Arial,Helvetica,sans-serif; margin:0; padding:18px; -webkit-font-smoothing:antialiased;}
-.container{max-width:960px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;}
-.header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;}
-.title{font-size:18px;font-weight:600;}
-.controls button{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--accent);padding:8px 10px;border-radius:8px;margin-left:8px;cursor:pointer;}
-.card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02));padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.02);}
-.label{font-size:12px;color:var(--muted); margin-bottom:6px;}
-.value{font-size:26px;font-weight:700;}
-.small{font-size:13px;color:var(--muted); margin-top:6px;}
-.row{display:flex;gap:8px;align-items:center;justify-content:space-between;}
-.canvas-wrap{grid-column:1/-1; padding:12px;}
-canvas{width:100%;height:160px;background:transparent;border-radius:8px;}
-.footer{grid-column:1/-1;color:var(--muted);font-size:12px;text-align:center;padding-top:8px;}
-.toggle{padding:8px 12px;border-radius:8px;border:none;cursor:pointer;background:var(--accent);color:#061021;font-weight:600;}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PLANT_CTRL_SYS</title>
+    <style>
+        /* BRUTALISM CSS RESET */
+        * { box-sizing: border-box; }
+        body { 
+            font-family: 'Courier New', Courier, monospace; 
+            padding: 20px; 
+            background-color: #e0e0e0; 
+            color: #000;
+        }
+        
+        h1, h2, h3, h4 {
+            text-transform: uppercase;
+            letter-spacing: -1px;
+            margin-bottom: 15px;
+        }
+
+        h1 { 
+            font-size: 2rem; 
+            border-bottom: 5px solid black; 
+            padding-bottom: 10px;
+            background: #fff;
+            border: 4px solid black;
+            box-shadow: 6px 6px 0px #000;
+            padding: 15px;
+        }
+
+        /* MAIN CONTAINER */
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        /* CARD STYLE */
+        .pump { 
+            margin: 30px 0; 
+            padding: 20px; 
+            background: #fff; 
+            border: 4px solid #000; 
+            box-shadow: 8px 8px 0px #000;
+        }
+
+        /* BUTTON CONTROLS */
+        .toggle-btn { 
+            display: block;
+            width: 100%;
+            padding: 20px; 
+            font-size: 24px; 
+            font-weight: 900;
+            font-family: 'Courier New', monospace;
+            text-transform: uppercase;
+            border: 4px solid #000;
+            cursor: pointer;
+            transition: all 0.1s;
+            margin-bottom: 15px;
+            border-radius: 0 !important; /* NO ROUNDED CORNERS */
+        }
+
+        .toggle-btn:active {
+            transform: translate(4px, 4px);
+            box-shadow: none !important;
+        }
+
+        .btn-on { 
+            background: #00ff66; /* Neon Green */
+            color: black; 
+            box-shadow: 6px 6px 0px #000;
+        }
+        
+        .btn-off { 
+            background: #ff3333; /* Brutal Red */
+            color: black; 
+            box-shadow: 6px 6px 0px #000;
+        }
+
+        /* MODE BUTTONS */
+        .mode-btn { 
+            padding: 10px 20px; 
+            margin: 5px 5px 5px 0;
+            background: #fff; 
+            color: black;
+            border: 3px solid #000;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+            cursor: pointer;
+            box-shadow: 4px 4px 0px #000;
+        }
+        
+        .mode-btn:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0px #000; }
+
+        .mode-btn.active {
+            background: #000;
+            color: #fff;
+        }
+
+        /* STATUS BADGE */
+        .status {
+            font-weight: bold;
+            padding: 10px;
+            border: 3px solid #000;
+            display: inline-block;
+            text-transform: uppercase;
+            background: #ffff00; /* Yellow */
+            font-size: 1.2rem;
+        }
+        
+        .status-on { background: #00ff66; color: black; }
+        .status-off { background: #ff3333; color: black; }
+
+        /* SCHEDULE CONTAINER */
+        .schedule-container {
+            margin-top: 25px;
+            padding: 20px;
+            background: #d4d4d4;
+            border: 4px solid #000;
+            display: none;
+        }
+        
+        .schedule-container.active { display: block; }
+
+        .schedule-section {
+            margin: 15px 0;
+            padding: 15px;
+            background: #fff;
+            border: 3px solid #000;
+        }
+
+        /* INPUTS */
+        .schedule-input, .schedule-select {
+            padding: 10px;
+            border: 3px solid #000;
+            background: #eee;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            font-size: 1rem;
+            border-radius: 0;
+        }
+        
+        .schedule-input:focus, .schedule-select:focus {
+            background: #fff;
+            outline: none;
+            box-shadow: 4px 4px 0px #000;
+        }
+
+        /* DAY SELECTOR */
+        .day-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin: 10px 0;
+        }
+        
+        .day-btn {
+            padding: 10px;
+            border: 3px solid #000;
+            background: #fff;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            cursor: pointer;
+            flex-grow: 1;
+            text-align: center;
+        }
+        
+        .day-btn.active {
+            background: #000;
+            color: #fff;
+        }
+
+        /* INFO BOX */
+        .info {
+            margin-top: 15px;
+            padding: 15px;
+            background: #000;
+            color: #00ff66; /* Terminal green text */
+            border: 3px solid #000;
+            font-family: 'Courier New', monospace;
+        }
+
+        .timer-display {
+            font-size: 1.2rem;
+            color: #ff3333;
+            font-weight: bold;
+            border-top: 1px dashed #00ff66;
+            margin-top: 10px;
+            padding-top: 5px;
+        }
+
+        /* UTILITY */
+        .btn-action {
+            padding: 15px; 
+            border: 3px solid #000;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+            font-family: 'Courier New', monospace;
+            box-shadow: 5px 5px 0px #000;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .btn-action:active { transform: translate(3px, 3px); box-shadow: 2px 2px 0px #000; }
+        
+        hr { border: 2px solid #000; margin: 20px 0; }
+
+    </style>
 </head>
 <body>
-<div class="container">
-  <div class="header">
-    <div class="title">Penyiram Otomatis — Dashboard</div>
-    <div class="controls">
-      <button id="btnAuto" class="toggle">AUTO</button>
-      <button id="btnManual" class="toggle" style="display:none;">MANUAL</button>
-      <button id="btnPumpOn">Pompa OFF</button>
-      <button id="btnPumpOff">Pompa ON</button>
+    <div class="container">
+        <h1>🌿 SYSTEM_PLANT_CTRL</h1>
+        
+        <div class="pump">
+            <h2>💧 WATER_PUMP_01</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <span id="status1" class="status status-off">OFFLINE</span>
+            </div>
+            <button id="toggle1" class="toggle-btn btn-off" onclick="togglePump(1)">
+                SWITCH ON
+            </button>
+        </div>
+        
+        <div class="pump">
+            <h2>🧪 NUTRIENT_PUMP_02</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <span id="status2" class="status status-off">OFFLINE</span>
+            </div>
+            <button id="toggle2" class="toggle-btn btn-off" onclick="togglePump(2)">
+                SWITCH ON
+            </button>
+            
+            <hr>
+
+            <div style="margin-top: 15px;">
+                <span style="font-weight:bold; background:#000; color:#fff; padding:5px;">MODE_SELECT:</span><br><br>
+                <button id="btnManual" class="mode-btn active" onclick="setMode('manual')">MANUAL</button>
+                <button id="btnSchedule" class="mode-btn" onclick="setMode('schedule')">AUTO_SCHED</button>
+            </div>
+            
+            <div style="margin-top: 15px;">
+                <span>CURRENT MODE: <strong id="mode2" style="background:#ffff00; padding:2px 5px; border:2px solid black;">MANUAL</strong></span>
+                <span id="scheduleStatus" style="display:block; margin-top:5px; font-weight:bold;"></span>
+            </div>
+
+            <div id="scheduleContainer" class="schedule-container">
+                <h3>⏰ SCHED_CONFIG</h3>
+                
+                <div class="schedule-section">
+                    <h4>START_TIME</h4>
+                    <div>
+                        <label>HR:</label>
+                        <input type="number" id="startHour" class="schedule-input" value="8" min="0" max="23" style="width: 60px;">
+                        <label>MN:</label>
+                        <input type="number" id="startMinute" class="schedule-input" value="0" min="0" max="59" style="width: 60px;">
+                    </div>
+                </div>
+                
+                <div class="schedule-section">
+                    <h4>ACTIVE_DAYS</h4>
+                    <div class="day-selector">
+                        <button class="day-btn active" onclick="toggleDay(0)">MON</button>
+                        <button class="day-btn active" onclick="toggleDay(1)">TUE</button>
+                        <button class="day-btn active" onclick="toggleDay(2)">WED</button>
+                        <button class="day-btn active" onclick="toggleDay(3)">THU</button>
+                        <button class="day-btn active" onclick="toggleDay(4)">FRI</button>
+                        <button class="day-btn active" onclick="toggleDay(5)">SAT</button>
+                        <button class="day-btn active" onclick="toggleDay(6)">SUN</button>
+                    </div>
+                </div>
+                
+                <div class="schedule-section">
+                    <h4>DURATION</h4>
+                    <div>
+                        <input type="number" id="scheduleDuration" class="schedule-input" value="30" min="1" max="999" style="width: 80px;">
+                        <select id="scheduleUnit" class="schedule-select">
+                            <option value="detik">SEC</option>
+                            <option value="menit">MIN</option>
+                            <option value="jam">HR</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <button onclick="toggleSchedule()" id="scheduleToggleBtn" class="btn-action" style="background: #ffff00;">
+                        ⚠ ACTIVATE
+                    </button>
+                    <button onclick="saveSchedule()" class="btn-action" style="background: #00ccff;">
+                        💾 SAVE_CFG
+                    </button>
+                </div>
+                
+                <div class="info" id="scheduleInfo">
+                    <div>NO_ACTIVE_SCHEDULE</div>
+                    <div id="currentTime" class="time-display" style="margin-top:5px; color:#fff;"></div>
+                </div>
+            </div>
+        </div>
     </div>
-  </div>
-
-  <div class="card">
-    <div class="label">Kelembapan Tanah</div>
-    <div class="value" id="soilPercent">--%</div>
-    <div class="small" id="soilRaw">ADC: --</div>
-  </div>
-
-  <div class="card">
-    <div class="label">Suhu Ruangan</div>
-    <div class="value" id="temp">--°C</div>
-    <div class="small" id="hum">Kelembapan Udara: --%</div>
-  </div>
-
-  <div class="card">
-    <div class="label">Pompa</div>
-    <div class="value" id="pump">--</div>
-    <div class="small" id="mode">Mode: --</div>
-  </div>
-
-  <div class="canvas-wrap card">
-    <div class="label">Grafik Kelembapan Tanah (Terakhir)</div>
-    <canvas id="chart" width="800" height="160"></canvas>
-  </div>
-
-  <div class="footer">Data refresh setiap 1 detik · API: <code>/data</code> · Actions: <code>/action?mode=auto</code>, <code>/action?pump=on</code></div>
-</div>
-
-<script>
-const UPDATE_MS = 1000;
-const MAX_POINTS = 40;
-let soilData = [];
-
-async function fetchData(){
-  try{
-    const r = await fetch('/data');
-    if(!r.ok) return;
-    const j = await r.json();
-    // update UI
-    document.getElementById('soilPercent').textContent = j.soil_percent + '%';
-    document.getElementById('soilRaw').textContent = 'ADC: ' + j.soil_raw;
-    document.getElementById('temp').textContent = (j.temp === null ? '--' : j.temp + '°C');
-    document.getElementById('hum').textContent = 'Kelembapan Udara: ' + (j.hum === null ? '--' : j.hum + '%');
-    document.getElementById('pump').textContent = j.pump ? 'ON' : 'OFF';
-    document.getElementById('mode').textContent = 'Mode: ' + (j.mode ? 'AUTO' : 'MANUAL');
-
-    // push to soil graph
-    const t = Date.now();
-    soilData.push({x:t, y:j.soil_percent});
-    if(soilData.length > MAX_POINTS) soilData.shift();
-    drawChart();
-  }catch(e){
-    console.log('fetchData error', e);
-  }
-}
-
-function drawChart(){
-  const c = document.getElementById('chart');
-  const ctx = c.getContext('2d');
-  // clear
-  ctx.clearRect(0,0,c.width,c.height);
-  // background grid
-  ctx.fillStyle = '#0f1115';
-  ctx.fillRect(0,0,c.width,c.height);
-  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-  ctx.lineWidth = 1;
-  for(let i=0;i<5;i++){
-    const y = (i/4)*c.height;
-    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(c.width,y); ctx.stroke();
-  }
-  if(soilData.length < 2) return;
-  // compute bounds
-  const ys = soilData.map(p=>p.y);
-  const ymin = 0;
-  const ymax = 100;
-  const xmin = soilData[0].x;
-  const xmax = soilData[soilData.length-1].x;
-  // draw line
-  ctx.strokeStyle = '#39c0ff';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  for(let i=0;i<soilData.length;i++){
-    const p = soilData[i];
-    const px = c.width * ((p.x - xmin) / (xmax - xmin || 1));
-    const py = c.height - ( (p.y - ymin) / (ymax - ymin) * c.height );
-    if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
-  }
-  ctx.stroke();
-  // draw dots
-  ctx.fillStyle = '#39c0ff';
-  for(let p of soilData){
-    const px = c.width * ((p.x - xmin) / (xmax - xmin || 1));
-    const py = c.height - ( (p.y - ymin) / (ymax - ymin) * c.height );
-    ctx.beginPath(); ctx.arc(px,py,2,0,2*Math.PI); ctx.fill();
-  }
-}
-
-document.getElementById('btnPumpOn').addEventListener('click', ()=>fetch('/action?pump=on'));
-document.getElementById('btnPumpOff').addEventListener('click', ()=>fetch('/action?pump=off'));
-document.getElementById('btnAuto').addEventListener('click', async ()=>{
-  await fetch('/action?mode=auto');
-  document.getElementById('btnAuto').style.display='none';
-  document.getElementById('btnManual').style.display='inline-block';
-});
-document.getElementById('btnManual').addEventListener('click', async ()=>{
-  await fetch('/action?mode=manual');
-  document.getElementById('btnManual').style.display='none';
-  document.getElementById('btnAuto').style.display='inline-block';
-});
-
-// initial toggle visibility based on server value (fetch once)
-(async function init(){
-  await fetchData();
-  setInterval(fetchData, UPDATE_MS);
-})();
-</script>
+    
+    <script>
+    let activeDays = [1, 1, 1, 1, 1, 1, 1];
+    let timerInterval;
+    
+    async function togglePump(pump) {
+        const res = await fetch('/status');
+        const data = await res.json();
+        
+        const currentState = (pump === 1) ? data.pump1 : data.pump2;
+        const action = currentState ? 'off' : 'on';
+        
+        await fetch('/control?pump=' + pump + '&action=' + action);
+        updateStatus();
+    }
+    
+    async function setMode(mode) {
+        await fetch('/mode?mode=' + mode);
+        
+        document.getElementById('btnManual').classList.remove('active');
+        document.getElementById('btnSchedule').classList.remove('active');
+        
+        if (mode === 'manual') {
+            document.getElementById('btnManual').classList.add('active');
+            document.getElementById('scheduleContainer').classList.remove('active');
+        } else {
+            document.getElementById('btnSchedule').classList.add('active');
+            document.getElementById('scheduleContainer').classList.add('active');
+        }
+        
+        updateStatus();
+    }
+    
+    function toggleDay(dayIndex) {
+        const btn = document.querySelectorAll('.day-btn')[dayIndex];
+        activeDays[dayIndex] = activeDays[dayIndex] ? 0 : 1;
+        
+        if (activeDays[dayIndex]) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    }
+    
+    async function toggleSchedule() {
+        const btn = document.getElementById('scheduleToggleBtn');
+        const isActive = btn.textContent.includes('ACTIVATE');
+        
+        if (isActive || btn.textContent.includes('AKTIFKAN')) {
+            await fetch('/schedule_enable?enable=1');
+        } else {
+            await fetch('/schedule_enable?enable=0');
+        }
+        updateStatus();
+    }
+    
+    async function saveSchedule() {
+        const hour = document.getElementById('startHour').value;
+        const minute = document.getElementById('startMinute').value;
+        const duration = document.getElementById('scheduleDuration').value;
+        const unit = document.getElementById('scheduleUnit').value;
+        const days = activeDays.join(',');
+        
+        await fetch('/schedule_set?hour=' + hour + '&minute=' + minute + 
+                    '&duration=' + duration + '&unit=' + unit + '&days=' + days);
+        
+        updateStatus();
+        alert('CONFIG_SAVED');
+    }
+    
+    async function updateStatus() {
+        const res = await fetch('/status');
+        const data = await res.json();
+        
+        // Update pompa 1
+        const toggleBtn1 = document.getElementById('toggle1');
+        const status1 = document.getElementById('status1');
+        
+        if (data.pump1) {
+            toggleBtn1.textContent = 'SWITCH OFF';
+            toggleBtn1.className = 'toggle-btn btn-on';
+            status1.textContent = 'ONLINE';
+            status1.className = 'status status-on';
+        } else {
+            toggleBtn1.textContent = 'SWITCH ON';
+            toggleBtn1.className = 'toggle-btn btn-off';
+            status1.textContent = 'OFFLINE';
+            status1.className = 'status status-off';
+        }
+        
+        // Update pompa 2
+        const toggleBtn2 = document.getElementById('toggle2');
+        const status2 = document.getElementById('status2');
+        
+        if (data.pump2) {
+            toggleBtn2.textContent = 'SWITCH OFF';
+            toggleBtn2.className = 'toggle-btn btn-on';
+            status2.textContent = 'ONLINE';
+            status2.className = 'status status-on';
+        } else {
+            toggleBtn2.textContent = 'SWITCH ON';
+            toggleBtn2.className = 'toggle-btn btn-off';
+            status2.textContent = 'OFFLINE';
+            status2.className = 'status status-off';
+        }
+        
+        // Update mode
+        document.getElementById('mode2').textContent = data.mode.toUpperCase();
+        
+        // Update schedule info
+        if (data.schedule_enabled !== undefined) {
+            const toggleBtn = document.getElementById('scheduleToggleBtn');
+            const statusLabel = document.getElementById('scheduleStatus');
+            
+            if (data.schedule_enabled) {
+                toggleBtn.innerHTML = '⏸ DEACTIVATE';
+                toggleBtn.style.background = '#ff3333'; 
+                statusLabel.textContent = '>> SCHEDULER: ACTIVE';
+                statusLabel.style.color = '#009900';
+            } else {
+                toggleBtn.innerHTML = '⚠ ACTIVATE';
+                toggleBtn.style.background = '#ffff00';
+                statusLabel.textContent = '>> SCHEDULER: INACTIVE';
+                statusLabel.style.color = '#cc0000';
+            }
+        }
+        
+        // Update schedule details
+        if (data.schedule_start_hour !== undefined) {
+            const dayNames = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+            let activeDayNames = [];
+            if (data.schedule_days) {
+                for (let i = 0; i < data.schedule_days.length; i++) {
+                    if (data.schedule_days[i] === 1) {
+                        activeDayNames.push(dayNames[i]);
+                    }
+                }
+            }
+            
+            const scheduleText = `${data.schedule_start_hour.toString().padStart(2, '0')}:${data.schedule_start_minute.toString().padStart(2, '0')} - ${data.schedule_duration} ${data.schedule_unit.toUpperCase()}`;
+            const daysText = activeDayNames.join(', ');
+            
+            let infoHtml = `
+                <div>TARGET: <strong>${scheduleText}</strong></div>
+                <div>DAYS: [ ${daysText} ]</div>
+                <div>STATE: ${data.schedule_enabled ? 'RUNNING' : 'STOPPED'}</div>
+            `;
+            
+            if (data.pump2 && data.mode === 'schedule' && data.schedule_enabled) {
+                let multiplier = 1;
+                if (data.schedule_unit === 'menit') multiplier = 60;
+                else if (data.schedule_unit === 'jam') multiplier = 3600;
+                const totalSeconds = data.schedule_duration * multiplier;
+                infoHtml += `<div id="timerDisplay" class="timer-display">>>> PUMPING: 0/${totalSeconds}s</div>`;
+            }
+            
+            document.getElementById('scheduleInfo').innerHTML = infoHtml;
+            
+            const now = new Date();
+            document.getElementById('currentTime').textContent = `SYS_TIME: ${now.toLocaleTimeString('id-ID')}`;
+        }
+    }
+    
+    setInterval(updateStatus, 2000);
+    updateStatus();
+    </script>
 </body>
 </html>
