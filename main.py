@@ -6,8 +6,8 @@ from time import sleep, time, localtime
 import ujson as json
 
 # ===================== KONFIGURASI =====================
-SSID = "Lab Telkom"
-PASSWORD = ""
+SSID = "WIFI-77"
+PASSWORD = "12345678"
 
 # ===================== PIN ESP32 =====================
 PUMP_1_PIN = 16
@@ -949,4 +949,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
