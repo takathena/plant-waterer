@@ -5,7 +5,6 @@ import machine
 from machine import Pin
 import ntptime
 import json
-import gc
 
 # Konfigurasi WiFi
 WIFI_SSID = "iot"
@@ -41,7 +40,6 @@ def load_schedule():
     try:
         with open('schedule.json', 'r') as f:
             loaded = json.load(f)
-            # Pastikan formatnya benar
             if "pompa1" in loaded and "pompa2" in loaded:
                 pump_schedule = loaded
                 print("Jadwal loaded")
@@ -78,7 +76,6 @@ CHECK_INTERVAL = 0.5
 
 # Nama hari dalam seminggu
 DAYS = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
-DAY_NAMES_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 # Koneksi WiFi
 def connect_wifi():
@@ -103,7 +100,7 @@ def connect_wifi():
 def setup_ap():
     ap = network.WLAN(network.AP_IF)
     ap.active(True)
-    ap.config(essid="PompaAP", password="12345678", authmode=3)
+    ap.config(essid="PompaAP", password="12345678")
     print("AP IP:", ap.ifconfig()[0])
     return ap.ifconfig()[0]
 
@@ -227,14 +224,6 @@ def get_schedule_data():
     for pump, schedules in pump_schedule.items():
         for idx, sched in enumerate(schedules):
             day_name = DAYS[sched["day"]]
-            hour_str = f"{sched['hour']:02d}"
-            minute_str = f"{sched['minute']:02d}"
-            
-            # Konversi durasi ke menit dan detik
-            total_seconds = sched["duration"]
-            hours = total_seconds // 3600
-            minutes = (total_seconds % 3600) // 60
-            seconds = total_seconds % 60
             
             schedule_list.append({
                 "id": f"{pump}_{idx}",
@@ -243,15 +232,9 @@ def get_schedule_data():
                 "day_name": day_name,
                 "hour": sched["hour"],
                 "minute": sched["minute"],
-                "hour_str": hour_str,
-                "minute_str": minute_str,
-                "duration": total_seconds,
-                "duration_hours": hours,
-                "duration_minutes": minutes,
-                "duration_seconds": seconds
+                "duration": sched["duration"]
             })
     
-    # Sort by day and time
     schedule_list.sort(key=lambda x: (x["day"], x["hour"], x["minute"]))
     
     return schedule_list
@@ -288,11 +271,7 @@ def handle_api(client, path, params):
             hour = int(params.get("hour", 0))
             minute = int(params.get("minute", 0))
             
-            # Parse durasi
-            hours = int(params.get("duration_hours", 0))
-            minutes = int(params.get("duration_minutes", 0))
-            seconds = int(params.get("duration_seconds", 0))
-            duration = hours * 3600 + minutes * 60 + seconds
+            duration = int(params.get("duration", 0))
             
             if pump in ["pompa1", "pompa2"] and 0 <= day <= 6 and 0 <= hour <= 23 and 0 <= minute <= 59 and duration > 0:
                 pump_schedule[pump].append({
@@ -321,8 +300,6 @@ def handle_api(client, path, params):
                         "success": True,
                         "message": "Jadwal dihapus"
                     }
-                else:
-                    response["message"] = "Jadwal tidak ditemukan"
                     
         elif path == "/api/clear_schedule":
             pump = params.get("pump", "")
@@ -342,7 +319,7 @@ def handle_api(client, path, params):
     
     return json.dumps(response)
 
-# HTML Dashboard
+# HTML Dashboard Sederhana
 def get_dashboard():
     html = """<!DOCTYPE html>
 <html>
@@ -358,52 +335,48 @@ def get_dashboard():
         }
         
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
             padding: 20px;
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 800px;
             margin: 0 auto;
             background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            overflow: hidden;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
         
         header {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-            color: white;
-            padding: 30px;
             text-align: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
         }
         
         h1 {
-            font-size: 2.5em;
+            color: #333;
             margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
         }
         
         .status-bar {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            padding: 15px 30px;
+            margin-bottom: 20px;
+            padding: 10px;
             background: #f8f9fa;
-            border-bottom: 1px solid #dee2e6;
+            border-radius: 5px;
         }
         
         .time-display {
-            font-size: 1.2em;
             font-weight: bold;
-            color: #333;
         }
         
         .sync-status {
-            padding: 5px 15px;
-            border-radius: 20px;
+            padding: 5px 10px;
+            border-radius: 3px;
             font-size: 0.9em;
         }
         
@@ -417,63 +390,35 @@ def get_dashboard():
             color: #721c24;
         }
         
-        .main-content {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 30px;
-            padding: 30px;
+        .section {
+            margin-bottom: 30px;
         }
         
-        @media (max-width: 768px) {
-            .main-content {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        .card {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-            border: 1px solid #e9ecef;
-        }
-        
-        .card h2 {
-            color: #333;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #4facfe;
+        .section h2 {
+            color: #444;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #4a90e2;
         }
         
         .pump-control {
             display: flex;
-            flex-direction: column;
             gap: 20px;
+            margin-bottom: 20px;
         }
         
         .pump-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 20px;
+            flex: 1;
+            padding: 15px;
             background: #f8f9fa;
-            border-radius: 10px;
-            transition: all 0.3s ease;
-        }
-        
-        .pump-item:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        }
-        
-        .pump-info h3 {
-            color: #333;
-            margin-bottom: 5px;
+            border-radius: 8px;
+            text-align: center;
         }
         
         .pump-status {
-            font-size: 1.1em;
+            font-size: 1.2em;
             font-weight: bold;
+            margin: 10px 0;
         }
         
         .status-on {
@@ -487,43 +432,40 @@ def get_dashboard():
         .timer-display {
             font-size: 0.9em;
             color: #666;
-            margin-top: 5px;
+            margin-bottom: 10px;
         }
         
         .btn {
-            padding: 12px 25px;
+            padding: 10px 20px;
             border: none;
-            border-radius: 8px;
+            border-radius: 5px;
             cursor: pointer;
-            font-weight: bold;
             font-size: 1em;
-            transition: all 0.3s ease;
+            margin: 5px;
         }
         
         .btn-toggle {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #4a90e2;
             color: white;
-            min-width: 120px;
+            width: 100%;
         }
         
-        .btn-toggle:hover {
-            transform: scale(1.05);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
         }
         
         .btn-on {
-            background: linear-gradient(135deg, #42e695 0%, #3bb2b8 100%);
+            background: #28a745;
             color: white;
+            flex: 1;
         }
         
         .btn-off {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            background: #dc3545;
             color: white;
-        }
-        
-        .btn-small {
-            padding: 8px 15px;
-            font-size: 0.9em;
+            flex: 1;
         }
         
         .btn-danger {
@@ -531,15 +473,11 @@ def get_dashboard():
             color: white;
         }
         
-        .btn-danger:hover {
-            background: #c82333;
-        }
-        
         .schedule-form {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-bottom: 25px;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
         }
         
         .form-group {
@@ -548,36 +486,20 @@ def get_dashboard():
         }
         
         .form-group label {
-            margin-bottom: 8px;
-            font-weight: 600;
+            margin-bottom: 5px;
+            font-weight: bold;
             color: #555;
         }
         
         select, input {
-            padding: 12px;
-            border: 2px solid #dee2e6;
-            border-radius: 8px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
             font-size: 1em;
-            transition: border-color 0.3s ease;
-        }
-        
-        select:focus, input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        
-        .duration-inputs {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-        }
-        
-        .duration-inputs input {
-            text-align: center;
         }
         
         .schedule-list {
-            max-height: 400px;
+            max-height: 300px;
             overflow-y: auto;
             margin-top: 20px;
         }
@@ -586,254 +508,156 @@ def get_dashboard():
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 15px;
+            padding: 10px;
             background: #f8f9fa;
-            border-radius: 10px;
-            margin-bottom: 10px;
-            border-left: 5px solid #4facfe;
-        }
-        
-        .schedule-info {
-            flex: 1;
-        }
-        
-        .schedule-time {
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 5px;
-        }
-        
-        .schedule-details {
-            font-size: 0.9em;
-            color: #666;
+            border-radius: 5px;
+            margin-bottom: 8px;
+            border-left: 4px solid #4a90e2;
         }
         
         .delete-btn {
-            background: none;
+            background: #dc3545;
+            color: white;
             border: none;
-            color: #dc3545;
-            cursor: pointer;
-            font-size: 1.2em;
             padding: 5px 10px;
-            border-radius: 5px;
-            transition: background 0.3s ease;
-        }
-        
-        .delete-btn:hover {
-            background: #f8d7da;
-        }
-        
-        .clear-btn {
-            margin-top: 15px;
-            width: 100%;
+            border-radius: 3px;
+            cursor: pointer;
         }
         
         .notification {
             position: fixed;
             top: 20px;
             right: 20px;
-            padding: 15px 25px;
-            border-radius: 10px;
+            padding: 15px 20px;
+            border-radius: 5px;
             color: white;
-            font-weight: bold;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-            transform: translateX(120%);
-            transition: transform 0.3s ease;
+            display: none;
             z-index: 1000;
         }
         
         .notification.show {
-            transform: translateX(0);
+            display: block;
         }
         
         .notification.success {
-            background: linear-gradient(135deg, #42e695 0%, #3bb2b8 100%);
+            background: #28a745;
         }
         
         .notification.error {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        }
-        
-        .loading {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(255,255,255,0.8);
-            justify-content: center;
-            align-items: center;
-            z-index: 9999;
-        }
-        
-        .loading.active {
-            display: flex;
-        }
-        
-        .spinner {
-            width: 50px;
-            height: 50px;
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            background: #dc3545;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🏭 KONTROL POMPA OTOMATIS</h1>
+            <h1>Kontrol Pompa Otomatis</h1>
             <p>Sistem Pengontrolan Pompa dengan Penjadwalan</p>
         </header>
         
         <div class="status-bar">
             <div class="time-display">
-                📅 <span id="currentDay">-</span> 
-                🕒 <span id="currentTime">-</span>
+                <span id="currentDay">-</span> 
+                <span id="currentTime">-</span>
             </div>
             <div id="syncStatus" class="sync-status"></div>
         </div>
         
-        <div class="main-content">
-            <!-- Kontrol Pompa -->
-            <div class="card">
-                <h2>🎛️ KONTROL MANUAL</h2>
-                <div class="pump-control">
-                    <div class="pump-item" id="pump1Control">
-                        <div class="pump-info">
-                            <h3>POMPA 1</h3>
-                            <div class="pump-status" id="pump1Status">LOADING...</div>
-                            <div class="timer-display" id="pump1Timer"></div>
-                        </div>
-                        <button class="btn btn-toggle" onclick="togglePump('pompa1')">TOGGLE</button>
-                    </div>
-                    
-                    <div class="pump-item" id="pump2Control">
-                        <div class="pump-info">
-                            <h3>POMPA 2</h3>
-                            <div class="pump-status" id="pump2Status">LOADING...</div>
-                            <div class="timer-display" id="pump2Timer"></div>
-                        </div>
-                        <button class="btn btn-toggle" onclick="togglePump('pompa2')">TOGGLE</button>
-                    </div>
-                    
-                    <div style="display: flex; gap: 10px;">
-                        <button class="btn btn-on" onclick="controlPump('all', 'on')">NYALAKAN SEMUA</button>
-                        <button class="btn btn-off" onclick="controlPump('all', 'off')">MATIKAN SEMUA</button>
-                    </div>
+        <div class="section">
+            <h2>Kontrol Manual</h2>
+            <div class="pump-control">
+                <div class="pump-item" id="pump1Control">
+                    <h3>POMPA 1</h3>
+                    <div class="pump-status" id="pump1Status">LOADING...</div>
+                    <div class="timer-display" id="pump1Timer"></div>
+                    <button class="btn btn-toggle" onclick="togglePump('pompa1')">TOGGLE</button>
+                </div>
+                
+                <div class="pump-item" id="pump2Control">
+                    <h3>POMPA 2</h3>
+                    <div class="pump-status" id="pump2Status">LOADING...</div>
+                    <div class="timer-display" id="pump2Timer"></div>
+                    <button class="btn btn-toggle" onclick="togglePump('pompa2')">TOGGLE</button>
                 </div>
             </div>
             
-            <!-- Penjadwalan -->
-            <div class="card">
-                <h2>📅 PENJADWALAN OTOMATIS</h2>
-                
-                <!-- Form Tambah Jadwal -->
-                <div class="schedule-form">
-                    <div class="form-group">
-                        <label for="pumpSelect">Pompa</label>
-                        <select id="pumpSelect">
-                            <option value="pompa1">Pompa 1</option>
-                            <option value="pompa2">Pompa 2</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="daySelect">Hari</label>
-                        <select id="daySelect">
-                            <option value="0">Senin</option>
-                            <option value="1">Selasa</option>
-                            <option value="2">Rabu</option>
-                            <option value="3">Kamis</option>
-                            <option value="4">Jumat</option>
-                            <option value="5">Sabtu</option>
-                            <option value="6">Minggu</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="hourSelect">Jam</label>
-                        <select id="hourSelect">
-                            """ + "".join([f'<option value="{i:02d}">{i:02d}</option>' for i in range(24)]) + """
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="minuteSelect">Menit</label>
-                        <select id="minuteSelect">
-                            """ + "".join([f'<option value="{i:02d}">{i:02d}</option>' for i in range(60)]) + """
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label>Durasi</label>
-                        <div class="duration-inputs">
-                            <input type="number" id="durationHours" min="0" max="23" value="0" placeholder="Jam">
-                            <input type="number" id="durationMinutes" min="0" max="59" value="1" placeholder="Menit">
-                            <input type="number" id="durationSeconds" min="0" max="59" value="0" placeholder="Detik">
-                        </div>
-                    </div>
-                </div>
-                
-                <button class="btn btn-toggle" onclick="addSchedule()">➕ TAMBAH JADWAL</button>
-                
-                <!-- Daftar Jadwal -->
-                <div class="schedule-list" id="scheduleList">
-                    <!-- Jadwal akan dimuat di sini -->
-                </div>
-                
-                <button class="btn btn-danger clear-btn" onclick="clearSchedule('all')">
-                    🗑️ HAPUS SEMUA JADWAL
-                </button>
+            <div class="btn-group">
+                <button class="btn btn-on" onclick="controlPump('all', 'on')">NYALAKAN SEMUA</button>
+                <button class="btn btn-off" onclick="controlPump('all', 'off')">MATIKAN SEMUA</button>
             </div>
+        </div>
+        
+        <div class="section">
+            <h2>Penjadwalan Otomatis</h2>
+            
+            <div class="schedule-form">
+                <div class="form-group">
+                    <label for="pumpSelect">Pompa</label>
+                    <select id="pumpSelect">
+                        <option value="pompa1">Pompa 1</option>
+                        <option value="pompa2">Pompa 2</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="daySelect">Hari</label>
+                    <select id="daySelect">
+                        <option value="0">Senin</option>
+                        <option value="1">Selasa</option>
+                        <option value="2">Rabu</option>
+                        <option value="3">Kamis</option>
+                        <option value="4">Jumat</option>
+                        <option value="5">Sabtu</option>
+                        <option value="6">Minggu</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="hourSelect">Jam</label>
+                    <select id="hourSelect">
+                        """ + "".join([f'<option value="{i:02d}">{i:02d}</option>' for i in range(24)]) + """
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="minuteSelect">Menit</label>
+                    <select id="minuteSelect">
+                        """ + "".join([f'<option value="{i:02d}">{i:02d}</option>' for i in range(60)]) + """
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="duration">Durasi (detik)</label>
+                    <input type="number" id="duration" min="1" value="60" placeholder="Detik">
+                </div>
+            </div>
+            
+            <button class="btn btn-toggle" onclick="addSchedule()">TAMBAH JADWAL</button>
+            
+            <div class="schedule-list" id="scheduleList">
+                <!-- Jadwal akan dimuat di sini -->
+            </div>
+            
+            <button class="btn btn-danger" onclick="clearSchedule('all')" style="width:100%; margin-top:15px;">
+                HAPUS SEMUA JADWAL
+            </button>
         </div>
     </div>
     
-    <!-- Notification -->
     <div class="notification" id="notification"></div>
-    
-    <!-- Loading -->
-    <div class="loading" id="loading">
-        <div class="spinner"></div>
-    </div>
     
     <script>
         let currentSchedules = [];
-        
-        // Format waktu
-        function formatTime(hours, minutes, seconds) {
-            let totalSeconds = hours * 3600 + minutes * 60 + seconds;
-            let parts = [];
-            
-            if (hours > 0) parts.push(`${hours} jam`);
-            if (minutes > 0) parts.push(`${minutes} menit`);
-            if (seconds > 0) parts.push(`${seconds} detik`);
-            
-            return parts.join(' ') || '0 detik';
-        }
         
         // Tampilkan notifikasi
         function showNotification(message, type = 'success') {
             const notification = document.getElementById('notification');
             notification.textContent = message;
-            notification.className = `notification ${type}`;
-            notification.classList.add('show');
+            notification.className = `notification ${type} show`;
             
             setTimeout(() => {
                 notification.classList.remove('show');
             }, 3000);
-        }
-        
-        // Tampilkan loading
-        function showLoading(show) {
-            document.getElementById('loading').classList.toggle('active', show);
         }
         
         // Update status pompa
@@ -844,18 +668,16 @@ def get_dashboard():
                 
                 if (data.success) {
                     // Update waktu
-                    document.getElementById('currentDay').textContent = data.day;
+                    document.getElementById('currentDay').textContent = data.day + ' ';
                     document.getElementById('currentTime').textContent = data.time;
                     
                     // Update status sync
                     const syncStatus = document.getElementById('syncStatus');
-                    syncStatus.textContent = data.sync ? '🔄 Tersinkronisasi' : '⚠️ Tidak tersinkronisasi';
+                    syncStatus.textContent = data.sync ? 'Tersinkronisasi' : 'Tidak tersinkronisasi';
                     syncStatus.className = data.sync ? 'sync-status sync-on' : 'sync-status sync-off';
                     
-                    // Update pompa 1
+                    // Update pompa
                     updatePumpDisplay('pompa1', data.pompa1);
-                    
-                    // Update pompa 2
                     updatePumpDisplay('pompa2', data.pompa2);
                 }
             } catch (error) {
@@ -869,25 +691,20 @@ def get_dashboard():
             const statusElement = document.getElementById(`pump${pumpNum}Status`);
             const timerElement = document.getElementById(`pump${pumpNum}Timer`);
             
-            // Update status
-            statusElement.textContent = data.status ? '🟢 ON' : '🔴 OFF';
+            statusElement.textContent = data.status ? 'ON' : 'OFF';
             statusElement.className = `pump-status ${data.status ? 'status-on' : 'status-off'}`;
             
-            // Update timer
             if (data.timer > 0) {
                 const minutes = Math.floor(data.timer / 60);
                 const seconds = data.timer % 60;
-                timerElement.textContent = `⏰ Timer: ${minutes}:${seconds.toString().padStart(2, '0')}`;
-                timerElement.style.color = '#ff9800';
+                timerElement.textContent = `Timer: ${minutes}:${seconds.toString().padStart(2, '0')}`;
             } else {
-                timerElement.textContent = '⏰ Tidak ada timer aktif';
-                timerElement.style.color = '#666';
+                timerElement.textContent = 'Tidak ada timer aktif';
             }
         }
         
         // Kontrol pompa
         async function togglePump(pump) {
-            showLoading(true);
             try {
                 const response = await fetch(`/toggle/${pump}`);
                 await response.json();
@@ -895,30 +712,21 @@ def get_dashboard():
                 showNotification(`Pompa ${pump} di-toggle`, 'success');
             } catch (error) {
                 showNotification('Gagal mengontrol pompa', 'error');
-            } finally {
-                showLoading(false);
             }
         }
         
         async function controlPump(pump, action) {
-            showLoading(true);
             try {
                 if (pump === 'all') {
-                    // Kontrol semua pompa
+                    const state = action === 'on';
                     for (const p of ['pompa1', 'pompa2']) {
-                        const state = action === 'on';
-                        // Ini hanya contoh - perlu endpoint API untuk set state spesifik
                         await fetch(`/api/set_pump?pump=${p}&state=${state}`);
                     }
-                } else {
-                    await fetch(`/api/set_pump?pump=${pump}&state=${action === 'on'}`);
                 }
                 await updateStatus();
                 showNotification(`Semua pompa ${action === 'on' ? 'dinyalakan' : 'dimatikan'}`, 'success');
             } catch (error) {
                 showNotification('Gagal mengontrol pompa', 'error');
-            } finally {
-                showLoading(false);
             }
         }
         
@@ -941,22 +749,11 @@ def get_dashboard():
             const scheduleList = document.getElementById('scheduleList');
             
             if (currentSchedules.length === 0) {
-                scheduleList.innerHTML = `
-                    <div style="text-align: center; padding: 30px; color: #666;">
-                        📭 Tidak ada jadwal yang ditambahkan
-                    </div>
-                `;
+                scheduleList.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">Tidak ada jadwal yang ditambahkan</div>';
                 return;
             }
             
             scheduleList.innerHTML = '';
-            
-            // Urutkan berdasarkan hari dan waktu
-            currentSchedules.sort((a, b) => {
-                if (a.day !== b.day) return a.day - b.day;
-                if (a.hour !== b.hour) return a.hour - b.hour;
-                return a.minute - b.minute;
-            });
             
             const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
             
@@ -964,18 +761,11 @@ def get_dashboard():
                 const scheduleItem = document.createElement('div');
                 scheduleItem.className = 'schedule-item';
                 scheduleItem.innerHTML = `
-                    <div class="schedule-info">
-                        <div class="schedule-time">
-                            📅 ${days[schedule.day]} - ${schedule.hour_str}:${schedule.minute_str}
-                        </div>
-                        <div class="schedule-details">
-                            Pompa: ${schedule.pump === 'pompa1' ? 'POMPA 1' : 'POMPA 2'} | 
-                            Durasi: ${formatTime(schedule.duration_hours, schedule.duration_minutes, schedule.duration_seconds)}
-                        </div>
+                    <div>
+                        <strong>${days[schedule.day]} ${schedule.hour.toString().padStart(2, '0')}:${schedule.minute.toString().padStart(2, '0')}</strong>
+                        <div>Pompa: ${schedule.pump === 'pompa1' ? 'POMPA 1' : 'POMPA 2'} | Durasi: ${schedule.duration} detik</div>
                     </div>
-                    <button class="delete-btn" onclick="deleteSchedule('${schedule.id}')">
-                        ❌
-                    </button>
+                    <button class="delete-btn" onclick="deleteSchedule('${schedule.id}')">Hapus</button>
                 `;
                 scheduleList.appendChild(scheduleItem);
             });
@@ -986,22 +776,12 @@ def get_dashboard():
             const day = parseInt(document.getElementById('daySelect').value);
             const hour = parseInt(document.getElementById('hourSelect').value);
             const minute = parseInt(document.getElementById('minuteSelect').value);
-            const hours = parseInt(document.getElementById('durationHours').value) || 0;
-            const minutes = parseInt(document.getElementById('durationMinutes').value) || 0;
-            const seconds = parseInt(document.getElementById('durationSeconds').value) || 0;
+            const duration = parseInt(document.getElementById('duration').value);
             
-            // Validasi
-            if (hours === 0 && minutes === 0 && seconds === 0) {
-                showNotification('Durasi tidak boleh 0', 'error');
+            if (duration <= 0) {
+                showNotification('Durasi harus lebih dari 0', 'error');
                 return;
             }
-            
-            if (minutes > 59 || seconds > 59) {
-                showNotification('Menit/detik tidak valid', 'error');
-                return;
-            }
-            
-            showLoading(true);
             
             try {
                 const params = new URLSearchParams({
@@ -1009,9 +789,7 @@ def get_dashboard():
                     day: day,
                     hour: hour,
                     minute: minute,
-                    duration_hours: hours,
-                    duration_minutes: minutes,
-                    duration_seconds: seconds
+                    duration: duration
                 });
                 
                 const response = await fetch(`/api/add_schedule?${params}`);
@@ -1020,24 +798,16 @@ def get_dashboard():
                 if (data.success) {
                     showNotification('Jadwal berhasil ditambahkan', 'success');
                     await loadSchedules();
-                    
-                    // Reset form
-                    document.getElementById('durationMinutes').value = '1';
-                    document.getElementById('durationSeconds').value = '0';
                 } else {
                     showNotification(data.message || 'Gagal menambahkan jadwal', 'error');
                 }
             } catch (error) {
                 showNotification('Terjadi kesalahan', 'error');
-            } finally {
-                showLoading(false);
             }
         }
         
         async function deleteSchedule(scheduleId) {
             if (!confirm('Hapus jadwal ini?')) return;
-            
-            showLoading(true);
             
             try {
                 const response = await fetch(`/api/delete_schedule?id=${scheduleId}`);
@@ -1046,20 +816,14 @@ def get_dashboard():
                 if (data.success) {
                     showNotification('Jadwal berhasil dihapus', 'success');
                     await loadSchedules();
-                } else {
-                    showNotification(data.message || 'Gagal menghapus jadwal', 'error');
                 }
             } catch (error) {
                 showNotification('Terjadi kesalahan', 'error');
-            } finally {
-                showLoading(false);
             }
         }
         
         async function clearSchedule(pump) {
             if (!confirm(`Hapus semua jadwal${pump === 'all' ? '' : ' untuk pompa ini'}?`)) return;
-            
-            showLoading(true);
             
             try {
                 const response = await fetch(`/api/clear_schedule?pump=${pump}`);
@@ -1068,13 +832,9 @@ def get_dashboard():
                 if (data.success) {
                     showNotification('Jadwal berhasil dikosongkan', 'success');
                     await loadSchedules();
-                } else {
-                    showNotification(data.message || 'Gagal mengosongkan jadwal', 'error');
                 }
             } catch (error) {
                 showNotification('Terjadi kesalahan', 'error');
-            } finally {
-                showLoading(false);
             }
         }
         
@@ -1083,10 +843,7 @@ def get_dashboard():
             updateStatus();
             loadSchedules();
             
-            // Update setiap 2 detik
             setInterval(updateStatus, 2000);
-            
-            // Update jadwal setiap 10 detik
             setInterval(loadSchedules, 10000);
         });
     </script>
@@ -1107,7 +864,6 @@ def handle_request(client, request):
         method = method_path[0]
         path = method_path[1]
         
-        # Extract query string
         path_parts = path.split('?')
         endpoint = path_parts[0]
         query_string = path_parts[1] if len(path_parts) > 1 else ''
@@ -1171,7 +927,6 @@ def run_server(ip):
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind(addr)
     s.listen(5)
-    
     s.setblocking(False)
     
     print(f"Server: http://{ip}")
@@ -1204,30 +959,24 @@ def run_server(ip):
         except KeyboardInterrupt:
             break
         except Exception as e:
-            print(f"Error in main loop: {e}")
             time.sleep(0.1)
 
 # Main
 def main():
-    # Load jadwal dari file
     load_schedule()
     
-    # Coba sync waktu
     for _ in range(3):
         if sync_time():
             break
         time.sleep(1)
     
-    # Koneksi WiFi
     ip = connect_wifi()
     if ip is None:
         ip = setup_ap()
     
-    # Jalankan server
     try:
         run_server(ip)
     finally:
-        # Matikan semua pompa saat keluar
         for pump in pump_status:
             set_pump(pump, False)
 
