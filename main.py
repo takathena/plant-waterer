@@ -450,24 +450,6 @@ def get_dashboard():
             width: 100%;
         }
         
-        .btn-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .btn-on {
-            background: #28a745;
-            color: white;
-            flex: 1;
-        }
-        
-        .btn-off {
-            background: #dc3545;
-            color: white;
-            flex: 1;
-        }
-        
         .btn-danger {
             background: #dc3545;
             color: white;
@@ -579,11 +561,6 @@ def get_dashboard():
                     <div class="timer-display" id="pump2Timer"></div>
                     <button class="btn btn-toggle" onclick="togglePump('pompa2')">TOGGLE</button>
                 </div>
-            </div>
-            
-            <div class="btn-group">
-                <button class="btn btn-on" onclick="controlPump('all', 'on')">NYALAKAN SEMUA</button>
-                <button class="btn btn-off" onclick="controlPump('all', 'off')">MATIKAN SEMUA</button>
             </div>
         </div>
         
@@ -710,21 +687,6 @@ def get_dashboard():
                 await response.json();
                 await updateStatus();
                 showNotification(`Pompa ${pump} di-toggle`, 'success');
-            } catch (error) {
-                showNotification('Gagal mengontrol pompa', 'error');
-            }
-        }
-        
-        async function controlPump(pump, action) {
-            try {
-                if (pump === 'all') {
-                    const state = action === 'on';
-                    for (const p of ['pompa1', 'pompa2']) {
-                        await fetch(`/api/set_pump?pump=${p}&state=${state}`);
-                    }
-                }
-                await updateStatus();
-                showNotification(`Semua pompa ${action === 'on' ? 'dinyalakan' : 'dimatikan'}`, 'success');
             } catch (error) {
                 showNotification('Gagal mengontrol pompa', 'error');
             }
@@ -891,11 +853,7 @@ def handle_request(client, request):
             pump = params.get('pump', '')
             state = params.get('state', '').lower() == 'true'
             
-            if pump == 'all':
-                set_pump("pompa1", state)
-                set_pump("pompa2", state)
-                response = '{"success":true}'
-            elif pump in pump_status:
+            if pump in pump_status:
                 set_pump(pump, state)
                 response = '{"success":true}'
             else:
