@@ -1,893 +1,1235 @@
-# system_plant_pro.py - PROFESSIONAL DARK EDITION (Network Analyzer Style)
 import network
 import socket
+import time
+import machine
 from machine import Pin
-from time import sleep, time, localtime
-import ujson as json
+import ntptime
+import json
+import gc
 
-# ===================== KONFIGURASI =====================
-SSID = "WIFI-77"
-PASSWORD = "12345678"
+# Konfigurasi WiFi
+WIFI_SSID = "iot"
+WIFI_PASSWORD = "Iot@12345678"
 
-# ===================== PIN ESP32 =====================
-PUMP_1_PIN = 16
-PUMP_2_PIN = 4
-PUMP_3_PIN = 17 
+# Konfigurasi pin
+RELAY_PINS = {
+    "pompa1": 16,
+    "pompa2": 17
+}
 
-relay_pump1 = Pin(PUMP_1_PIN, Pin.OUT)
-relay_pump2 = Pin(PUMP_2_PIN, Pin.OUT)
-relay_pump3 = Pin(PUMP_3_PIN, Pin.OUT)
+# Inisialisasi relay
+relays = {}
+for name, pin in RELAY_PINS.items():
+    relays[name] = Pin(pin, Pin.OUT)
+    relays[name].value(1)
 
-relay_pump1.value(1)  # OFF (active LOW)
-relay_pump2.value(1)  # OFF (active LOW)
-relay_pump3.value(1)  # OFF (active LOW)
+# Status pompa
+pump_status = {
+    "pompa1": False,
+    "pompa2": False
+}
 
-# ===================== STATUS =====================
-pump1_state = 0
-pump2_state = 0
-pump3_state = 0
-pump2_mode = "manual"
-pump3_mode = "manual"
+# Default jadwal (kosong)
+pump_schedule = {
+    "pompa1": [],
+    "pompa2": []
+}
 
-# ===================== SCHEDULE =====================
-schedule_enabled = False
-schedule_enabled_3 = False
-schedule_start_hour = 8
-schedule_start_minute = 0
-schedule_duration = 30
-schedule_unit = "detik"
-schedule_days = [1, 1, 1, 1, 1, 1, 1]
+# Load jadwal dari file
+def load_schedule():
+    global pump_schedule
+    try:
+        with open('schedule.json', 'r') as f:
+            loaded = json.load(f)
+            # Pastikan formatnya benar
+            if "pompa1" in loaded and "pompa2" in loaded:
+                pump_schedule = loaded
+                print("Jadwal loaded")
+                return True
+    except:
+        pass
+    return False
 
-schedule_start_hour_3 = 9
-schedule_start_minute_3 = 0
-schedule_duration_3 = 30
-schedule_unit_3 = "detik"
-schedule_days_3 = [1, 1, 1, 1, 1, 1, 1]
+# Save jadwal ke file
+def save_schedule():
+    try:
+        with open('schedule.json', 'w') as f:
+            json.dump(pump_schedule, f)
+        print("Jadwal saved")
+        return True
+    except:
+        print("Gagal save jadwal")
+        return False
 
-last_schedule_check = 0
-last_schedule_check_3 = 0
-pump_start_time = 0
-pump_start_time_3 = 0
-schedule_executed = False 
-schedule_executed_3 = False
+# Timer aktif pompa
+active_timers = {
+    "pompa1": {"active": False, "end_time": 0},
+    "pompa2": {"active": False, "end_time": 0}
+}
 
-# ===================== RELAY FUNCTIONS =====================
-def control_pump1(state):
-    relay_pump1.value(0 if state else 1)
+# Status waktu
+time_synced = False
+last_sync = 0
+SYNC_INTERVAL = 3600
 
-def control_pump2(state):
-    relay_pump2.value(0 if state else 1)
+# Variabel untuk non-blocking delay
+last_check = 0
+CHECK_INTERVAL = 0.5
 
-def control_pump3(state): 
-    relay_pump3.value(0 if state else 1)
+# Nama hari dalam seminggu
+DAYS = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+DAY_NAMES_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-# ===================== SCHEDULE CORE =====================
+# Koneksi WiFi
+def connect_wifi():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    
+    if not wlan.isconnected():
+        print("Connecting WiFi...")
+        wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+        
+        timeout = 0
+        while not wlan.isconnected() and timeout < 20:
+            time.sleep(0.5)
+            timeout += 1
+    
+    if wlan.isconnected():
+        print("IP:", wlan.ifconfig()[0])
+        return wlan.ifconfig()[0]
+    return None
+
+# Setup AP
+def setup_ap():
+    ap = network.WLAN(network.AP_IF)
+    ap.active(True)
+    ap.config(essid="PompaAP", password="12345678", authmode=3)
+    print("AP IP:", ap.ifconfig()[0])
+    return ap.ifconfig()[0]
+
+# Sync waktu
+def sync_time():
+    global time_synced, last_sync
+    
+    if not network.WLAN(network.STA_IF).isconnected():
+        return False
+    
+    try:
+        ntptime.host = "pool.ntp.org"
+        ntptime.settime()
+        
+        t = time.localtime()
+        new_hour = t[3] + 7
+        if new_hour >= 24:
+            new_hour -= 24
+        
+        machine.RTC().datetime((t[0], t[1], t[2], t[6], new_hour, t[4], t[5], 0))
+        
+        time_synced = True
+        last_sync = time.time()
+        print("Time synced")
+        return True
+    except:
+        return False
+
+# Kontrol pompa
+def set_pump(pump, state):
+    if pump in pump_status:
+        pump_status[pump] = state
+        relays[pump].value(0 if state else 1)
+        
+        if not state:
+            active_timers[pump] = {"active": False, "end_time": 0}
+        
+        return state
+    return None
+
+# Timer pompa
+def start_timer(pump, duration):
+    set_pump(pump, True)
+    active_timers[pump] = {
+        "active": True,
+        "end_time": time.time() + duration
+    }
+
+# Cek jadwal
 def check_schedule():
-    global pump2_state, pump3_state, last_schedule_check, last_schedule_check_3
-    global pump_start_time, pump_start_time_3, schedule_executed, schedule_executed_3
+    if not time_synced:
+        return
+    
+    now = time.localtime()
+    day = now[6]
+    hour = now[3]
+    minute = now[4]
+    
+    for pump, schedules in pump_schedule.items():
+        for sched in schedules:
+            if (sched["day"] == day and 
+                sched["hour"] == hour and 
+                sched["minute"] == minute):
+                
+                today = time.localtime()
+                today_date = (today[0], today[1], today[2])
+                
+                if sched.get("last_executed") != today_date:
+                    start_timer(pump, sched["duration"])
+                    sched["last_executed"] = today_date
+                    print(f"Jadwal dieksekusi: {pump} hari {DAYS[day]} {hour:02d}:{minute:02d}")
 
-    # ===== CHECK SCHEDULE PUMP 2 =====
-    if pump2_mode == "schedule" and schedule_enabled:
-        now = time()
-        if now - last_schedule_check >= 1:
-            last_schedule_check = now
-            lt = localtime()
-            hour = lt[3]
-            minute = lt[4]
-            weekday = lt[6]
+# Cek timer
+def check_timers():
+    now = time.time()
+    
+    for pump, timer in active_timers.items():
+        if timer["active"] and now >= timer["end_time"]:
+            set_pump(pump, False)
+            print(f"Timer selesai: {pump}")
 
-            if minute != schedule_start_minute:
-                schedule_executed = False
+# Cek sync
+def check_sync():
+    global time_synced
+    if not time_synced or (time.time() - last_sync) > SYNC_INTERVAL:
+        sync_time()
 
-            if schedule_days[weekday] == 1:
-                if (hour == schedule_start_hour and
-                    minute == schedule_start_minute and
-                    not schedule_executed):
+# Ambil data status untuk JSON
+def get_status_data():
+    t = time.localtime()
+    time_str = f"{t[3]:02d}:{t[4]:02d}:{t[5]:02d}"
+    day_str = DAYS[t[6]]
+    
+    timer1 = 0
+    timer2 = 0
+    
+    if active_timers["pompa1"]["active"]:
+        timer1 = max(0, int(active_timers["pompa1"]["end_time"] - time.time()))
+    
+    if active_timers["pompa2"]["active"]:
+        timer2 = max(0, int(active_timers["pompa2"]["end_time"] - time.time()))
+    
+    return {
+        "pompa1": {
+            "status": pump_status["pompa1"],
+            "timer": timer1
+        },
+        "pompa2": {
+            "status": pump_status["pompa2"],
+            "timer": timer2
+        },
+        "time": time_str,
+        "day": day_str,
+        "sync": time_synced
+    }
 
-                    pump2_state = 1
-                    control_pump2(1)
-                    pump_start_time = now
-                    schedule_executed = True
-                    print("SCHEDULE PUMP 2 START")
+# Ambil data jadwal
+def get_schedule_data():
+    schedule_list = []
+    
+    for pump, schedules in pump_schedule.items():
+        for idx, sched in enumerate(schedules):
+            day_name = DAYS[sched["day"]]
+            hour_str = f"{sched['hour']:02d}"
+            minute_str = f"{sched['minute']:02d}"
+            
+            # Konversi durasi ke menit dan detik
+            total_seconds = sched["duration"]
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+            
+            schedule_list.append({
+                "id": f"{pump}_{idx}",
+                "pump": pump,
+                "day": sched["day"],
+                "day_name": day_name,
+                "hour": sched["hour"],
+                "minute": sched["minute"],
+                "hour_str": hour_str,
+                "minute_str": minute_str,
+                "duration": total_seconds,
+                "duration_hours": hours,
+                "duration_minutes": minutes,
+                "duration_seconds": seconds
+            })
+    
+    # Sort by day and time
+    schedule_list.sort(key=lambda x: (x["day"], x["hour"], x["minute"]))
+    
+    return schedule_list
 
-                if pump2_state == 1:
-                    elapsed = now - pump_start_time
-                    multiplier = 1
-                    if schedule_unit == "menit": multiplier = 60
-                    elif schedule_unit == "jam": multiplier = 3600
+# Parsing URL
+def parse_query_string(query_string):
+    params = {}
+    if query_string:
+        pairs = query_string.split('&')
+        for pair in pairs:
+            if '=' in pair:
+                key, value = pair.split('=', 1)
+                params[key] = value
+    return params
 
-                    if elapsed >= schedule_duration * multiplier:
-                        pump2_state = 0
-                        control_pump2(0)
-                        print("SCHEDULE PUMP 2 STOP")
+# Handler untuk API
+def handle_api(client, path, params):
+    response = {"success": False}
+    
+    try:
+        if path == "/api/status":
+            response = get_status_data()
+            response["success"] = True
+            
+        elif path == "/api/schedule":
+            response = {
+                "success": True,
+                "schedules": get_schedule_data()
+            }
+            
+        elif path == "/api/add_schedule":
+            pump = params.get("pump", "")
+            day = int(params.get("day", 0))
+            hour = int(params.get("hour", 0))
+            minute = int(params.get("minute", 0))
+            
+            # Parse durasi
+            hours = int(params.get("duration_hours", 0))
+            minutes = int(params.get("duration_minutes", 0))
+            seconds = int(params.get("duration_seconds", 0))
+            duration = hours * 3600 + minutes * 60 + seconds
+            
+            if pump in ["pompa1", "pompa2"] and 0 <= day <= 6 and 0 <= hour <= 23 and 0 <= minute <= 59 and duration > 0:
+                pump_schedule[pump].append({
+                    "day": day,
+                    "hour": hour,
+                    "minute": minute,
+                    "duration": duration
+                })
+                save_schedule()
+                response = {
+                    "success": True,
+                    "message": "Jadwal ditambahkan"
+                }
+            else:
+                response["message"] = "Data tidak valid"
+                
+        elif path == "/api/delete_schedule":
+            schedule_id = params.get("id", "")
+            if "_" in schedule_id:
+                pump, idx = schedule_id.split("_")
+                idx = int(idx)
+                if pump in pump_schedule and 0 <= idx < len(pump_schedule[pump]):
+                    del pump_schedule[pump][idx]
+                    save_schedule()
+                    response = {
+                        "success": True,
+                        "message": "Jadwal dihapus"
+                    }
+                else:
+                    response["message"] = "Jadwal tidak ditemukan"
+                    
+        elif path == "/api/clear_schedule":
+            pump = params.get("pump", "")
+            if pump == "all":
+                pump_schedule["pompa1"] = []
+                pump_schedule["pompa2"] = []
+            elif pump in pump_schedule:
+                pump_schedule[pump] = []
+            save_schedule()
+            response = {
+                "success": True,
+                "message": "Jadwal dikosongkan"
+            }
+            
+    except Exception as e:
+        response["message"] = f"Error: {str(e)}"
+    
+    return json.dumps(response)
 
-    # ===== CHECK SCHEDULE PUMP 3 =====
-    if pump3_mode == "schedule" and schedule_enabled_3:
-        now = time()
-        if now - last_schedule_check_3 >= 1:
-            last_schedule_check_3 = now
-            lt = localtime()
-            hour = lt[3]
-            minute = lt[4]
-            weekday = lt[6]
-
-            if minute != schedule_start_minute_3:
-                schedule_executed_3 = False
-
-            if schedule_days_3[weekday] == 1:
-                if (hour == schedule_start_hour_3 and
-                    minute == schedule_start_minute_3 and
-                    not schedule_executed_3):
-
-                    pump3_state = 1
-                    control_pump3(1)
-                    pump_start_time_3 = now
-                    schedule_executed_3 = True
-                    print("SCHEDULE PUMP 3 START")
-
-                if pump3_state == 1:
-                    elapsed = now - pump_start_time_3
-                    multiplier = 1
-                    if schedule_unit_3 == "menit": multiplier = 60
-                    elif schedule_unit_3 == "jam": multiplier = 3600
-
-                    if elapsed >= schedule_duration_3 * multiplier:
-                        pump3_state = 0
-                        control_pump3(0)
-                        print("SCHEDULE PUMP 3 STOP")
-
-# ===================== HTML (DARK ANALYZER STYLE) =====================
-def get_html():
-    return """HTTP/1.1 200 OK
-Content-Type: text/html
-Connection: close
-
-<!DOCTYPE html>
-<html lang="en">
+# HTML Dashboard
+def get_dashboard():
+    html = """<!DOCTYPE html>
+<html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PLANT CONTROLLER</title>
+    <title>Kontrol Pompa Otomatis</title>
     <style>
-        :root {
-            --bg-app: #09090b;
-            --bg-card: #09090b;
-            --border: #27272a;
-            --primary: #10b981; /* Emerald Green */
-            --primary-dim: rgba(16, 185, 129, 0.1);
-            --danger: #ef4444;
-            --danger-dim: rgba(239, 68, 68, 0.1);
-            --text-main: #e4e4e7;
-            --text-muted: #a6a6af;
-            --radius: 8px;
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
-        
-        * { box-sizing: border-box; margin: 0; padding: 0; }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-app);
-            color: var(--text-main);
-            padding: 24px;
-            font-size: 14px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
         }
-
+        
         .container {
-            max-width: 1100px;
+            max-width: 1200px;
             margin: 0 auto;
-        }
-
-        /* HEADER */
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 32px;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 16px;
-        }
-
-        h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.025em; }
-        .sys-badge {
-            font-family: 'Courier New', Courier, monospace;
-            background: var(--border);
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            color: #fbbf24;
-        }
-
-        /* GRID */
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 24px;
-        }
-
-        /* CARDS */
-        .card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 24px;
-            display: flex;
-            flex-direction: column;
-            position: relative;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             overflow: hidden;
         }
         
-        .card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 0px;
-            background: var(--border);
-        }
-        
-        .card:hover { border-color: #3f3f46; }
-
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
-        }
-        
-        .card-title {
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .status-dot {
-            width: 8px; height: 8px;
-            border-radius: 50%;
-            background: var(--text-muted);
-            box-shadow: 0 0 0 0 rgba(255,255,255,0);
-            transition: all 0.3s;
-        }
-        
-        .status-dot.active {
-            background: var(--primary);
-            box-shadow: 0 0 8px var(--primary);
-        }
-        
-        .status-text {
-            font-family: 'Courier New', monospace;
-            font-size: 0.75rem;
-            color: var(--text-muted);
-        }
-
-        /* CONTROLS */
-        .main-btn {
-            width: 100%;
-            padding: 12px;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            color: var(--text-main);
-            border-radius: var(--radius);
-            cursor: pointer;
-            font-weight: 500;
-            transition: all 0.2s;
-            margin-bottom: 20px;
-        }
-        
-        .main-btn:hover { background: #18181b; border-color: #52525b; }
-        
-        .main-btn.btn-active {
-            background: var(--primary-dim);
-            color: var(--primary);
-            border-color: var(--primary);
-        }
-        
-        .main-btn.btn-danger {
-            background: var(--danger-dim);
-            color: var(--danger);
-            border-color: var(--danger);
-        }
-
-        /* TABS */
-        .tabs {
-            display: flex;
-            background: #18181b;
-            padding: 4px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-        }
-        
-        .tab-btn {
-            flex: 1;
-            background: transparent;
-            border: none;
-            color: var(--text-muted);
-            padding: 6px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            border-radius: 4px;
-            transition: all 0.2s;
-        }
-        
-        .tab-btn.active {
-            background: #27272a;
-            color: var(--text-main);
-            font-weight: 500;
-        }
-
-        /* INPUTS */
-        .input-group {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 12px;
-        }
-        
-        .input-wrapper { flex: 1; }
-        
-        label {
-            display: block;
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            margin-bottom: 4px;
-            font-family: 'Courier New', monospace;
-        }
-        
-        input, select {
-            width: 100%;
-            background: #000;
-            border: 1px solid var(--border);
-            color: var(--text-main);
-            padding: 8px;
-            border-radius: 4px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-        }
-        
-        input:focus, select:focus {
-            outline: none;
-            border-color: var(--text-muted);
-        }
-
-        /* DAYS */
-        .days {
-            display: flex;
-            gap: 4px;
-            margin: 16px 0;
-        }
-        
-        .day {
-            flex: 1;
+        header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 30px;
             text-align: center;
-            padding: 6px 0;
-            font-size: 0.7rem;
-            background: #18181b;
-            color: var(--text-muted);
-            cursor: pointer;
-            border-radius: 4px;
-            border: 1px solid transparent;
         }
         
-        .day.active {
-            background: var(--primary-dim);
-            color: var(--primary);
-            border-color: var(--primary);
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
         }
-
-        /* FOOTER INFO */
-        .panel-footer {
-            margin-top: auto;
-            border-top: 1px solid var(--border);
-            padding-top: 12px;
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            font-family: 'Courier New', monospace;
+        
+        .status-bar {
             display: flex;
             justify-content: space-between;
+            align-items: center;
+            padding: 15px 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
         }
-
-        .action-row { display: flex; gap: 8px; margin-top: 12px; }
-        .hidden { display: none; }
         
-        /* Specific Colors */
-        .text-primary { color: var(--primary); }
-        .text-danger { color: var(--danger); }
+        .time-display {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #333;
+        }
         
+        .sync-status {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+        
+        .sync-on {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .sync-off {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            padding: 30px;
+        }
+        
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            border: 1px solid #e9ecef;
+        }
+        
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #4facfe;
+        }
+        
+        .pump-control {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .pump-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .pump-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .pump-info h3 {
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .pump-status {
+            font-size: 1.1em;
+            font-weight: bold;
+        }
+        
+        .status-on {
+            color: #28a745;
+        }
+        
+        .status-off {
+            color: #dc3545;
+        }
+        
+        .timer-display {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-toggle {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-width: 120px;
+        }
+        
+        .btn-toggle:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-on {
+            background: linear-gradient(135deg, #42e695 0%, #3bb2b8 100%);
+            color: white;
+        }
+        
+        .btn-off {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        
+        .btn-small {
+            padding: 8px 15px;
+            font-size: 0.9em;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        
+        .schedule-form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .form-group label {
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+        
+        select, input {
+            padding: 12px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s ease;
+        }
+        
+        select:focus, input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .duration-inputs {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        
+        .duration-inputs input {
+            text-align: center;
+        }
+        
+        .schedule-list {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        
+        .schedule-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            border-left: 5px solid #4facfe;
+        }
+        
+        .schedule-info {
+            flex: 1;
+        }
+        
+        .schedule-time {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .schedule-details {
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        .delete-btn {
+            background: none;
+            border: none;
+            color: #dc3545;
+            cursor: pointer;
+            font-size: 1.2em;
+            padding: 5px 10px;
+            border-radius: 5px;
+            transition: background 0.3s ease;
+        }
+        
+        .delete-btn:hover {
+            background: #f8d7da;
+        }
+        
+        .clear-btn {
+            margin-top: 15px;
+            width: 100%;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 10px;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            transform: translateX(120%);
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+        
+        .notification.show {
+            transform: translateX(0);
+        }
+        
+        .notification.success {
+            background: linear-gradient(135deg, #42e695 0%, #3bb2b8 100%);
+        }
+        
+        .notification.error {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        
+        .loading {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255,255,255,0.8);
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        
+        .loading.active {
+            display: flex;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <div class="status-dot active"></div>
-                <h1>SMART WATERING</h1>
-            </div>
-            <div class="sys-badge" id="sysTime">CONNECTING...</div>
+            <h1>🏭 KONTROL POMPA OTOMATIS</h1>
+            <p>Sistem Pengontrolan Pompa dengan Penjadwalan</p>
         </header>
-
-        <div class="grid">
+        
+        <div class="status-bar">
+            <div class="time-display">
+                📅 <span id="currentDay">-</span> 
+                🕒 <span id="currentTime">-</span>
+            </div>
+            <div id="syncStatus" class="sync-status"></div>
+        </div>
+        
+        <div class="main-content">
+            <!-- Kontrol Pompa -->
             <div class="card">
-                <div class="card-header">
-                    <div class="card-title">
-                        <span>WATER SUPPLY</span>
-                    </div>
-                    <div class="status-text" id="statusText1">OFFLINE</div>
-                </div>
-
-                <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center;">
-                    <div style="text-align: center; margin-bottom: 20px;">
-                        <span style="font-size: 3rem;" id="icon1">
-                            <img src="https://img.icons8.com/?size=100&id=yCrb4IAdZbpK&format=png&color=000000" alt="">
-                        </span>
+                <h2>🎛️ KONTROL MANUAL</h2>
+                <div class="pump-control">
+                    <div class="pump-item" id="pump1Control">
+                        <div class="pump-info">
+                            <h3>POMPA 1</h3>
+                            <div class="pump-status" id="pump1Status">LOADING...</div>
+                            <div class="timer-display" id="pump1Timer"></div>
+                        </div>
+                        <button class="btn btn-toggle" onclick="togglePump('pompa1')">TOGGLE</button>
                     </div>
                     
-                    <button id="toggle1" class="main-btn" onclick="togglePump(1)">
-                        INITIALIZE PUMP
-                    </button>
+                    <div class="pump-item" id="pump2Control">
+                        <div class="pump-info">
+                            <h3>POMPA 2</h3>
+                            <div class="pump-status" id="pump2Status">LOADING...</div>
+                            <div class="timer-display" id="pump2Timer"></div>
+                        </div>
+                        <button class="btn btn-toggle" onclick="togglePump('pompa2')">TOGGLE</button>
+                    </div>
                     
-                    <div style="background: #18181b; padding: 10px; border-radius: 4px; font-size: 0.75rem; color: #fbbf24; border: 1px dashed #fbbf24;">
-                        ⚠ LOGIC INVERTED: DISPLAY STATE FLIPPED
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-on" onclick="controlPump('all', 'on')">NYALAKAN SEMUA</button>
+                        <button class="btn btn-off" onclick="controlPump('all', 'off')">MATIKAN SEMUA</button>
                     </div>
-                </div>
-
-                <div class="panel-footer">
-                    <span>ID: RELAY_01</span>
-                    <span>MODE: MANUAL</span>
                 </div>
             </div>
-
+            
+            <!-- Penjadwalan -->
             <div class="card">
-                <div class="card-header">
-                    <div class="card-title">
-                        <span>NUTRIENT DOSING</span>
+                <h2>📅 PENJADWALAN OTOMATIS</h2>
+                
+                <!-- Form Tambah Jadwal -->
+                <div class="schedule-form">
+                    <div class="form-group">
+                        <label for="pumpSelect">Pompa</label>
+                        <select id="pumpSelect">
+                            <option value="pompa1">Pompa 1</option>
+                            <option value="pompa2">Pompa 2</option>
+                        </select>
                     </div>
-                    <div class="status-dot" id="dot2"></div>
-                </div>
-
-                <div class="tabs">
-                    <button id="tabMan2" class="tab-btn active" onclick="setMode(2, 'manual')">MANUAL</button>
-                    <button id="tabSch2" class="tab-btn" onclick="setMode(2, 'schedule')">AUTO / SCHEDULE</button>
-                </div>
-
-                <div id="panelMan2">
-                    <div style="text-align: center; margin: 24px 0;">
-                        <span style="font-size: 2rem; display:block; margin-bottom:10px;"><img src="https://img.icons8.com/?size=100&id=P1dNF9nyOWBt&format=png&color=000000" alt=""></span>
-                        <div style="font-family: 'Courier New'; color: var(--text-muted);">MANUAL OVERRIDE</div>
+                    
+                    <div class="form-group">
+                        <label for="daySelect">Hari</label>
+                        <select id="daySelect">
+                            <option value="0">Senin</option>
+                            <option value="1">Selasa</option>
+                            <option value="2">Rabu</option>
+                            <option value="3">Kamis</option>
+                            <option value="4">Jumat</option>
+                            <option value="5">Sabtu</option>
+                            <option value="6">Minggu</option>
+                        </select>
                     </div>
-                    <button id="toggle2" class="main-btn" onclick="togglePump(2)">START DOSING</button>
-                </div>
-
-                <div id="panelSch2" class="hidden">
-                    <div class="input-group">
-                        <div class="input-wrapper">
-                            <label>START HOUR</label>
-                            <input type="number" id="startHour2" min="0" max="23">
-                        </div>
-                        <div class="input-wrapper">
-                            <label>START MIN</label>
-                            <input type="number" id="startMinute2" min="0" max="59">
-                        </div>
+                    
+                    <div class="form-group">
+                        <label for="hourSelect">Jam</label>
+                        <select id="hourSelect">
+                            """ + "".join([f'<option value="{i:02d}">{i:02d}</option>' for i in range(24)]) + """
+                        </select>
                     </div>
-
-                    <div class="days">
-                        <div class="day" onclick="toggleDay(2,0)">M</div>
-                        <div class="day" onclick="toggleDay(2,1)">T</div>
-                        <div class="day" onclick="toggleDay(2,2)">W</div>
-                        <div class="day" onclick="toggleDay(2,3)">T</div>
-                        <div class="day" onclick="toggleDay(2,4)">F</div>
-                        <div class="day" onclick="toggleDay(2,5)">S</div>
-                        <div class="day" onclick="toggleDay(2,6)">S</div>
+                    
+                    <div class="form-group">
+                        <label for="minuteSelect">Menit</label>
+                        <select id="minuteSelect">
+                            """ + "".join([f'<option value="{i:02d}">{i:02d}</option>' for i in range(60)]) + """
+                        </select>
                     </div>
-
-                    <div class="input-group">
-                        <div class="input-wrapper" style="flex:1">
-                            <label>DURATION</label>
-                            <input type="number" id="scheduleDuration2">
-                        </div>
-                        <div class="input-wrapper" style="flex:1">
-                            <label>UNIT</label>
-                            <select id="scheduleUnit2">
-                                <option value="detik">SEC</option>
-                                <option value="menit">MIN</option>
-                                <option value="jam">HOUR</option>
-                            </select>
+                    
+                    <div class="form-group">
+                        <label>Durasi</label>
+                        <div class="duration-inputs">
+                            <input type="number" id="durationHours" min="0" max="23" value="0" placeholder="Jam">
+                            <input type="number" id="durationMinutes" min="0" max="59" value="1" placeholder="Menit">
+                            <input type="number" id="durationSeconds" min="0" max="59" value="0" placeholder="Detik">
                         </div>
                     </div>
-
-                    <div class="action-row">
-                        <button onclick="saveSchedule(2)" class="main-btn" style="margin:0; font-size:0.8rem;">SAVE CONFIG</button>
-                        <button id="scheduleToggleBtn2" onclick="toggleSchedule(2)" class="main-btn" style="margin:0; font-size:0.8rem;">ENABLE</button>
-                    </div>
                 </div>
-
-                <div class="panel-footer">
-                    <span>ID: RELAY_02</span>
-                    <span id="scheduleInfo2">NO DATA</span>
+                
+                <button class="btn btn-toggle" onclick="addSchedule()">➕ TAMBAH JADWAL</button>
+                
+                <!-- Daftar Jadwal -->
+                <div class="schedule-list" id="scheduleList">
+                    <!-- Jadwal akan dimuat di sini -->
                 </div>
-            </div>
-
-            <div class="card">
-                <div class="card-header">
-                    <div class="card-title">
-                        <span>AUXILIARY PUMP</span>
-                    </div>
-                    <div class="status-dot" id="dot3"></div>
-                </div>
-
-                <div class="tabs">
-                    <button id="tabMan3" class="tab-btn active" onclick="setMode(3, 'manual')">MANUAL</button>
-                    <button id="tabSch3" class="tab-btn" onclick="setMode(3, 'schedule')">AUTO / SCHEDULE</button>
-                </div>
-
-                <div id="panelMan3">
-                    <div style="text-align: center; margin: 24px 0;">
-                        <span style="font-size: 2rem; display:block; margin-bottom:10px;">
-                            <img src="https://img.icons8.com/?size=100&id=PHisKgEYGbvs&format=png&color=000000" alt="">
-                        </span>
-                        <div style="font-family: 'Courier New'; color: var(--text-muted);">MANUAL OVERRIDE</div>
-                    </div>
-                    <button id="toggle3" class="main-btn" onclick="togglePump(3)">START PUMP</button>
-                </div>
-
-                <div id="panelSch3" class="hidden">
-                    <div class="input-group">
-                        <div class="input-wrapper">
-                            <label>START HOUR</label>
-                            <input type="number" id="startHour3" min="0" max="23">
-                        </div>
-                        <div class="input-wrapper">
-                            <label>START MIN</label>
-                            <input type="number" id="startMinute3" min="0" max="59">
-                        </div>
-                    </div>
-
-                    <div class="days">
-                        <div class="day" onclick="toggleDay(3,0)">M</div>
-                        <div class="day" onclick="toggleDay(3,1)">T</div>
-                        <div class="day" onclick="toggleDay(3,2)">W</div>
-                        <div class="day" onclick="toggleDay(3,3)">T</div>
-                        <div class="day" onclick="toggleDay(3,4)">F</div>
-                        <div class="day" onclick="toggleDay(3,5)">S</div>
-                        <div class="day" onclick="toggleDay(3,6)">S</div>
-                    </div>
-
-                    <div class="input-group">
-                        <div class="input-wrapper" style="flex:1">
-                            <label>DURATION</label>
-                            <input type="number" id="scheduleDuration3">
-                        </div>
-                        <div class="input-wrapper" style="flex:1">
-                            <label>UNIT</label>
-                            <select id="scheduleUnit3">
-                                <option value="detik">SEC</option>
-                                <option value="menit">MIN</option>
-                                <option value="jam">HOUR</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="action-row">
-                        <button onclick="saveSchedule(3)" class="main-btn" style="margin:0; font-size:0.8rem;">SAVE CONFIG</button>
-                        <button id="scheduleToggleBtn3" onclick="toggleSchedule(3)" class="main-btn" style="margin:0; font-size:0.8rem;">ENABLE</button>
-                    </div>
-                </div>
-
-                <div class="panel-footer">
-                    <span>ID: RELAY_03</span>
-                    <span id="scheduleInfo3">NO DATA</span>
-                </div>
+                
+                <button class="btn btn-danger clear-btn" onclick="clearSchedule('all')">
+                    🗑️ HAPUS SEMUA JADWAL
+                </button>
             </div>
         </div>
     </div>
-
+    
+    <!-- Notification -->
+    <div class="notification" id="notification"></div>
+    
+    <!-- Loading -->
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+    </div>
+    
     <script>
-    let activeDays2 = [1, 1, 1, 1, 1, 1, 1];
-    let activeDays3 = [1, 1, 1, 1, 1, 1, 1];
-    
-    async function apiCall(url) {
-        try { await fetch(url); updateStatus(); } 
-        catch (e) { console.error(e); }
-    }
-
-    async function togglePump(pump) {
-        const res = await fetch('/status');
-        const data = await res.json();
-        let currentState = 0;
-        if (pump === 1) currentState = data.pump1;
-        if (pump === 2) currentState = data.pump2;
-        if (pump === 3) currentState = data.pump3;
-
-        // Logic normal pump 2 & 3
-        let action = currentState ? 'off' : 'on';
+        let currentSchedules = [];
         
-        // PUMP 1: Kirim perintah sesuai logic backend, tapi UI akan menipu (invert)
-        // Backend: 1=ON, 0=OFF.
-        await apiCall('/control?pump=' + pump + '&action=' + action);
-    }
-    
-    async function setMode(pump, mode) {
-        await apiCall('/mode?pump=' + pump + '&mode=' + mode);
-        updateUIForMode(pump, mode);
-    }
-
-    function updateUIForMode(pump, mode) {
-        const isManual = mode === 'manual';
-        const panelMan = document.getElementById('panelMan' + pump);
-        const panelSch = document.getElementById('panelSch' + pump);
-        const tabMan = document.getElementById('tabMan' + pump);
-        const tabSch = document.getElementById('tabSch' + pump);
-        
-        if (isManual) {
-            panelMan.classList.remove('hidden');
-            panelSch.classList.add('hidden');
-            tabMan.classList.add('active');
-            tabSch.classList.remove('active');
-        } else {
-            panelMan.classList.add('hidden');
-            panelSch.classList.remove('hidden');
-            tabMan.classList.remove('active');
-            tabSch.classList.add('active');
+        // Format waktu
+        function formatTime(hours, minutes, seconds) {
+            let totalSeconds = hours * 3600 + minutes * 60 + seconds;
+            let parts = [];
+            
+            if (hours > 0) parts.push(`${hours} jam`);
+            if (minutes > 0) parts.push(`${minutes} menit`);
+            if (seconds > 0) parts.push(`${seconds} detik`);
+            
+            return parts.join(' ') || '0 detik';
         }
-    }
-    
-    function toggleDay(pump, idx) {
-        const days = pump === 2 ? activeDays2 : activeDays3;
-        days[idx] = days[idx] ? 0 : 1;
         
-        // Select direct children of .days container
-        const parent = document.querySelectorAll(pump === 2 ? '#panelSch2 .days .day' : '#panelSch3 .days .day');
-        if (days[idx]) parent[idx].classList.add('active');
-        else parent[idx].classList.remove('active');
-    }
-    
-    async function toggleSchedule(pump) {
-        const btn = document.getElementById('scheduleToggleBtn' + pump);
-        const isActive = btn.classList.contains('btn-danger'); 
-        await apiCall('/schedule_enable?pump=' + pump + '&enable=' + (isActive ? '0' : '1'));
-    }
-    
-    async function saveSchedule(pump) {
-        const id = pump === 2 ? '2' : '3';
-        const h = document.getElementById('startHour'+id).value;
-        const m = document.getElementById('startMinute'+id).value;
-        const d = document.getElementById('scheduleDuration'+id).value;
-        const u = document.getElementById('scheduleUnit'+id).value;
-        const days = (pump === 2 ? activeDays2 : activeDays3).join(',');
-        
-        await apiCall('/schedule_set?pump='+pump+'&hour='+h+'&minute='+m+'&duration='+d+'&unit='+u+'&days='+days);
-        alert('Configuration Saved.');
-    }
-    
-    async function updateStatus() {
-        try {
-            const res = await fetch('/status');
-            const data = await res.json();
+        // Tampilkan notifikasi
+        function showNotification(message, type = 'success') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.classList.add('show');
             
-            updatePumpUI(1, data.pump1);
-            updatePumpUI(2, data.pump2);
-            updatePumpUI(3, data.pump3);
-            
-            updateScheduleUI(2, data);
-            updateScheduleUI(3, data);
-
-            const d = new Date();
-            document.getElementById('sysTime').innerText = "SYS_TIME: " + d.toLocaleTimeString('en-GB');
-            
-            updateUIForMode(2, data.mode2 || 'manual');
-            updateUIForMode(3, data.mode3 || 'manual');
-
-        } catch (e) { console.log("Connection lost"); }
-    }
-    
-    function updatePumpUI(pump, state) {
-        // ===========================================
-        // INVERT LOGIC VISUAL FOR PUMP 1
-        // ===========================================
-        if (pump === 1) state = !state; 
-        
-        // Elements
-        let statusText, btnEl, dotEl;
-        
-        if(pump === 1) {
-             statusText = document.getElementById('statusText1');
-             btnEl = document.getElementById('toggle1');
-        } else {
-             btnEl = document.getElementById('toggle' + pump);
-             dotEl = document.getElementById('dot' + pump);
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
         }
-
-        if (state) {
-            // ON STATE
-            if(pump === 1) statusText.innerText = "ONLINE";
-            if(pump !== 1) dotEl.classList.add('active');
-            
-            btnEl.innerText = "STOP OPERATION";
-            btnEl.className = "main-btn btn-danger";
-        } else {
-            // OFF STATE
-            if(pump === 1) statusText.innerText = "OFFLINE";
-            if(pump !== 1) dotEl.classList.remove('active');
-            
-            btnEl.innerText = "INITIALIZE PUMP";
-            btnEl.className = "main-btn btn-active";
-        }
-    }
-    
-    function updateScheduleUI(pump, data) {
-        const id = pump === 2 ? '' : '_3';
-        const enabled = pump === 2 ? data.schedule_enabled : data.schedule_enabled_3;
-        const btn = document.getElementById('scheduleToggleBtn' + pump);
-        const info = document.getElementById('scheduleInfo' + pump);
         
-        if (enabled) {
-            btn.innerText = "DISABLE";
-            btn.className = "main-btn btn-danger";
-            
-            const h = data['schedule_start_hour' + id];
-            const m = data['schedule_start_minute' + id].toString().padStart(2,'0');
-            const dur = data['schedule_duration' + id];
-            const unit = data['schedule_unit' + id].toUpperCase();
-            
-            info.innerHTML = `<span class="text-primary">RUN: ${h}:${m} (${dur} ${unit})</span>`;
-        } else {
-            btn.innerText = "ENABLE";
-            btn.className = "main-btn btn-active";
-            info.innerHTML = "SCHEDULER STANDBY";
+        // Tampilkan loading
+        function showLoading(show) {
+            document.getElementById('loading').classList.toggle('active', show);
         }
-    }
-    
-    // Init
-    setInterval(updateStatus, 1000);
-    updateStatus();
+        
+        // Update status pompa
+        async function updateStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Update waktu
+                    document.getElementById('currentDay').textContent = data.day;
+                    document.getElementById('currentTime').textContent = data.time;
+                    
+                    // Update status sync
+                    const syncStatus = document.getElementById('syncStatus');
+                    syncStatus.textContent = data.sync ? '🔄 Tersinkronisasi' : '⚠️ Tidak tersinkronisasi';
+                    syncStatus.className = data.sync ? 'sync-status sync-on' : 'sync-status sync-off';
+                    
+                    // Update pompa 1
+                    updatePumpDisplay('pompa1', data.pompa1);
+                    
+                    // Update pompa 2
+                    updatePumpDisplay('pompa2', data.pompa2);
+                }
+            } catch (error) {
+                console.error('Error updating status:', error);
+            }
+        }
+        
+        // Update tampilan pompa
+        function updatePumpDisplay(pump, data) {
+            const pumpNum = pump === 'pompa1' ? '1' : '2';
+            const statusElement = document.getElementById(`pump${pumpNum}Status`);
+            const timerElement = document.getElementById(`pump${pumpNum}Timer`);
+            
+            // Update status
+            statusElement.textContent = data.status ? '🟢 ON' : '🔴 OFF';
+            statusElement.className = `pump-status ${data.status ? 'status-on' : 'status-off'}`;
+            
+            // Update timer
+            if (data.timer > 0) {
+                const minutes = Math.floor(data.timer / 60);
+                const seconds = data.timer % 60;
+                timerElement.textContent = `⏰ Timer: ${minutes}:${seconds.toString().padStart(2, '0')}`;
+                timerElement.style.color = '#ff9800';
+            } else {
+                timerElement.textContent = '⏰ Tidak ada timer aktif';
+                timerElement.style.color = '#666';
+            }
+        }
+        
+        // Kontrol pompa
+        async function togglePump(pump) {
+            showLoading(true);
+            try {
+                const response = await fetch(`/toggle/${pump}`);
+                await response.json();
+                await updateStatus();
+                showNotification(`Pompa ${pump} di-toggle`, 'success');
+            } catch (error) {
+                showNotification('Gagal mengontrol pompa', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        async function controlPump(pump, action) {
+            showLoading(true);
+            try {
+                if (pump === 'all') {
+                    // Kontrol semua pompa
+                    for (const p of ['pompa1', 'pompa2']) {
+                        const state = action === 'on';
+                        // Ini hanya contoh - perlu endpoint API untuk set state spesifik
+                        await fetch(`/api/set_pump?pump=${p}&state=${state}`);
+                    }
+                } else {
+                    await fetch(`/api/set_pump?pump=${pump}&state=${action === 'on'}`);
+                }
+                await updateStatus();
+                showNotification(`Semua pompa ${action === 'on' ? 'dinyalakan' : 'dimatikan'}`, 'success');
+            } catch (error) {
+                showNotification('Gagal mengontrol pompa', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        // Jadwal functions
+        async function loadSchedules() {
+            try {
+                const response = await fetch('/api/schedule');
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentSchedules = data.schedules;
+                    renderSchedules();
+                }
+            } catch (error) {
+                console.error('Error loading schedules:', error);
+            }
+        }
+        
+        function renderSchedules() {
+            const scheduleList = document.getElementById('scheduleList');
+            
+            if (currentSchedules.length === 0) {
+                scheduleList.innerHTML = `
+                    <div style="text-align: center; padding: 30px; color: #666;">
+                        📭 Tidak ada jadwal yang ditambahkan
+                    </div>
+                `;
+                return;
+            }
+            
+            scheduleList.innerHTML = '';
+            
+            // Urutkan berdasarkan hari dan waktu
+            currentSchedules.sort((a, b) => {
+                if (a.day !== b.day) return a.day - b.day;
+                if (a.hour !== b.hour) return a.hour - b.hour;
+                return a.minute - b.minute;
+            });
+            
+            const days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+            
+            currentSchedules.forEach(schedule => {
+                const scheduleItem = document.createElement('div');
+                scheduleItem.className = 'schedule-item';
+                scheduleItem.innerHTML = `
+                    <div class="schedule-info">
+                        <div class="schedule-time">
+                            📅 ${days[schedule.day]} - ${schedule.hour_str}:${schedule.minute_str}
+                        </div>
+                        <div class="schedule-details">
+                            Pompa: ${schedule.pump === 'pompa1' ? 'POMPA 1' : 'POMPA 2'} | 
+                            Durasi: ${formatTime(schedule.duration_hours, schedule.duration_minutes, schedule.duration_seconds)}
+                        </div>
+                    </div>
+                    <button class="delete-btn" onclick="deleteSchedule('${schedule.id}')">
+                        ❌
+                    </button>
+                `;
+                scheduleList.appendChild(scheduleItem);
+            });
+        }
+        
+        async function addSchedule() {
+            const pump = document.getElementById('pumpSelect').value;
+            const day = parseInt(document.getElementById('daySelect').value);
+            const hour = parseInt(document.getElementById('hourSelect').value);
+            const minute = parseInt(document.getElementById('minuteSelect').value);
+            const hours = parseInt(document.getElementById('durationHours').value) || 0;
+            const minutes = parseInt(document.getElementById('durationMinutes').value) || 0;
+            const seconds = parseInt(document.getElementById('durationSeconds').value) || 0;
+            
+            // Validasi
+            if (hours === 0 && minutes === 0 && seconds === 0) {
+                showNotification('Durasi tidak boleh 0', 'error');
+                return;
+            }
+            
+            if (minutes > 59 || seconds > 59) {
+                showNotification('Menit/detik tidak valid', 'error');
+                return;
+            }
+            
+            showLoading(true);
+            
+            try {
+                const params = new URLSearchParams({
+                    pump: pump,
+                    day: day,
+                    hour: hour,
+                    minute: minute,
+                    duration_hours: hours,
+                    duration_minutes: minutes,
+                    duration_seconds: seconds
+                });
+                
+                const response = await fetch(`/api/add_schedule?${params}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    showNotification('Jadwal berhasil ditambahkan', 'success');
+                    await loadSchedules();
+                    
+                    // Reset form
+                    document.getElementById('durationMinutes').value = '1';
+                    document.getElementById('durationSeconds').value = '0';
+                } else {
+                    showNotification(data.message || 'Gagal menambahkan jadwal', 'error');
+                }
+            } catch (error) {
+                showNotification('Terjadi kesalahan', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        async function deleteSchedule(scheduleId) {
+            if (!confirm('Hapus jadwal ini?')) return;
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch(`/api/delete_schedule?id=${scheduleId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    showNotification('Jadwal berhasil dihapus', 'success');
+                    await loadSchedules();
+                } else {
+                    showNotification(data.message || 'Gagal menghapus jadwal', 'error');
+                }
+            } catch (error) {
+                showNotification('Terjadi kesalahan', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        async function clearSchedule(pump) {
+            if (!confirm(`Hapus semua jadwal${pump === 'all' ? '' : ' untuk pompa ini'}?`)) return;
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch(`/api/clear_schedule?pump=${pump}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    showNotification('Jadwal berhasil dikosongkan', 'success');
+                    await loadSchedules();
+                } else {
+                    showNotification(data.message || 'Gagal mengosongkan jadwal', 'error');
+                }
+            } catch (error) {
+                showNotification('Terjadi kesalahan', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        // Inisialisasi
+        document.addEventListener('DOMContentLoaded', () => {
+            updateStatus();
+            loadSchedules();
+            
+            // Update setiap 2 detik
+            setInterval(updateStatus, 2000);
+            
+            // Update jadwal setiap 10 detik
+            setInterval(loadSchedules, 10000);
+        });
     </script>
 </body>
 </html>"""
+    return html
 
-# ===================== SERVER =====================
-def handle_request(conn, request):
-    global pump1_state, pump2_state, pump3_state, pump2_mode, pump3_mode
-    global schedule_enabled, schedule_enabled_3, schedule_start_hour, schedule_start_hour_3
-    global schedule_start_minute, schedule_start_minute_3, schedule_duration, schedule_duration_3
-    global schedule_unit, schedule_unit_3, schedule_days, schedule_days_3
-    global schedule_executed, schedule_executed_3
-
-    if "/ " in request:
-        conn.send(get_html())
-
-    elif "/status" in request:
-        data = {
-            "pump1": pump1_state,
-            "pump2": pump2_state,
-            "pump3": pump3_state,
-            "mode2": pump2_mode,
-            "mode3": pump3_mode,
-            "schedule_enabled": schedule_enabled,
-            "schedule_enabled_3": schedule_enabled_3,
-            "schedule_start_hour": schedule_start_hour,
-            "schedule_start_hour_3": schedule_start_hour_3,
-            "schedule_start_minute": schedule_start_minute,
-            "schedule_start_minute_3": schedule_start_minute_3,
-            "schedule_duration": schedule_duration,
-            "schedule_duration_3": schedule_duration_3,
-            "schedule_unit": schedule_unit,
-            "schedule_unit_3": schedule_unit_3,
-            "schedule_days": schedule_days,
-            "schedule_days_3": schedule_days_3
-        }
-        conn.send(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
-            + json.dumps(data)
-        )
-
-    elif "/control" in request:
-        if "pump=1" in request:
-            if "action=on" in request:
-                pump1_state = 1
-                control_pump1(1)
-            elif "action=off" in request:
-                pump1_state = 0
-                control_pump1(0)
-
-        elif "pump=2" in request:
-            if "action=on" in request:
-                pump2_state = 1
-                control_pump2(1)
-            elif "action=off" in request:
-                pump2_state = 0
-                control_pump2(0)
-                schedule_executed = False
-
-        elif "pump=3" in request:
-            if "action=on" in request:
-                pump3_state = 1
-                control_pump3(1)
-            elif "action=off" in request:
-                pump3_state = 0
-                control_pump3(0)
-                schedule_executed_3 = False
-
-        conn.send("HTTP/1.1 200 OK\r\n\r\n")
-
-    elif "/mode" in request:
-        q = request.split("?")[1].split(" ")[0]
-        p = dict(x.split("=") for x in q.split("&"))
-        pump_num = int(p.get("pump", 2))
-        mode = p.get("mode", "manual")
+# Handler request
+def handle_request(client, request):
+    try:
+        request_line = request.split('\r\n')[0]
+        method_path = request_line.split(' ')
         
-        if pump_num == 2:
-            pump2_mode = mode
-            if mode == "manual":
-                pump2_state = 0
-                control_pump2(0)
-                schedule_executed = False
-        elif pump_num == 3:
-            pump3_mode = mode
-            if mode == "manual":
-                pump3_state = 0
-                control_pump3(0)
-                schedule_executed_3 = False
-        conn.send("HTTP/1.1 200 OK\r\n\r\n")
-
-    elif "/schedule_enable" in request:
-        q = request.split("?")[1].split(" ")[0]
-        p = dict(x.split("=") for x in q.split("&"))
-        pump_num = int(p.get("pump", 2))
-        enable = p.get("enable") == "1"
-        if pump_num == 2: schedule_enabled = enable
-        elif pump_num == 3: schedule_enabled_3 = enable
-        conn.send("HTTP/1.1 200 OK\r\n\r\n")
-
-    elif "/schedule_set" in request:
-        try:
-            q = request.split("?")[1].split(" ")[0]
-            p = dict(x.split("=") for x in q.split("&"))
-            pump_num = int(p.get("pump", 2))
+        if len(method_path) < 2:
+            client.close()
+            return
             
-            if pump_num == 2:
-                schedule_start_hour = int(p["hour"])
-                schedule_start_minute = int(p["minute"])
-                schedule_duration = int(p["duration"])
-                schedule_unit = p["unit"]
-                schedule_days = [int(x) for x in p["days"].split(",")]
-                schedule_executed = False
+        method = method_path[0]
+        path = method_path[1]
+        
+        # Extract query string
+        path_parts = path.split('?')
+        endpoint = path_parts[0]
+        query_string = path_parts[1] if len(path_parts) > 1 else ''
+        
+        if endpoint == '/':
+            client.send('HTTP/1.1 200 OK\r\nContent-type: text/html\r\n\r\n')
+            client.send(get_dashboard())
+            
+        elif endpoint.startswith('/api/'):
+            params = parse_query_string(query_string)
+            response = handle_api(client, endpoint, params)
+            client.send('HTTP/1.1 200 OK\r\nContent-type: application/json\r\n\r\n')
+            client.send(response)
+            
+        elif endpoint.startswith('/toggle/'):
+            if 'pompa1' in endpoint:
+                set_pump("pompa1", not pump_status["pompa1"])
+            elif 'pompa2' in endpoint:
+                set_pump("pompa2", not pump_status["pompa2"])
+            client.send('HTTP/1.1 200 OK\r\nContent-type: application/json\r\n\r\n')
+            client.send('{"success":true}')
+            
+        elif endpoint == '/api/set_pump':
+            params = parse_query_string(query_string)
+            pump = params.get('pump', '')
+            state = params.get('state', '').lower() == 'true'
+            
+            if pump == 'all':
+                set_pump("pompa1", state)
+                set_pump("pompa2", state)
+                response = '{"success":true}'
+            elif pump in pump_status:
+                set_pump(pump, state)
+                response = '{"success":true}'
+            else:
+                response = '{"success":false,"message":"Pompa tidak ditemukan"}'
                 
-            elif pump_num == 3:
-                schedule_start_hour_3 = int(p["hour"])
-                schedule_start_minute_3 = int(p["minute"])
-                schedule_duration_3 = int(p["duration"])
-                schedule_unit_3 = p["unit"]
-                schedule_days_3 = [int(x) for x in p["days"].split(",")]
-                schedule_executed_3 = False
-        except: pass
-        conn.send("HTTP/1.1 200 OK\r\n\r\n")
+            client.send('HTTP/1.1 200 OK\r\nContent-type: application/json\r\n\r\n')
+            client.send(response)
+            
+        else:
+            client.send('HTTP/1.1 404 Not Found\r\nContent-type: text/plain\r\n\r\n')
+            client.send('404 Not Found')
+            
+    except Exception as e:
+        try:
+            client.send('HTTP/1.1 500 Internal Error\r\nContent-type: text/plain\r\n\r\n')
+            client.send('Internal Server Error')
+        except:
+            pass
+    finally:
+        try:
+            client.close()
+        except:
+            pass
 
-    else:
-        conn.send("HTTP/1.1 404\r\n\r\n")
-
-# ===================== MAIN =====================
-def main():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    wlan.connect(SSID, PASSWORD)
-
-    while not wlan.isconnected():
-        sleep(0.5)
-
-    print("IP:", wlan.ifconfig()[0])
-
+# Server web
+def run_server(ip):
+    addr = socket.getaddrinfo('0.0.0.0', 80)[0][-1]
     s = socket.socket()
-    s.bind(("0.0.0.0", 80))
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(addr)
     s.listen(5)
-
+    
+    s.setblocking(False)
+    
+    print(f"Server: http://{ip}")
+    
+    global last_check
+    
     while True:
         try:
-            conn, addr = s.accept()
-            conn.settimeout(3.0)
-            request = conn.recv(1024).decode()
-            handle_request(conn, request)
-            conn.close()
-        except OSError:
-            conn.close()
+            current_time = time.time()
+            if current_time - last_check >= CHECK_INTERVAL:
+                check_sync()
+                check_schedule()
+                check_timers()
+                last_check = current_time
+            
+            try:
+                client, addr = s.accept()
+                try:
+                    client.settimeout(5.0)
+                    request = client.recv(4096).decode()
+                    if request:
+                        handle_request(client, request)
+                except:
+                    client.close()
+            except OSError:
+                pass
+            
+            time.sleep(0.01)
+            
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            print(f"Error in main loop: {e}")
+            time.sleep(0.1)
 
-        check_schedule()
-        sleep(0.1)
+# Main
+def main():
+    # Load jadwal dari file
+    load_schedule()
+    
+    # Coba sync waktu
+    for _ in range(3):
+        if sync_time():
+            break
+        time.sleep(1)
+    
+    # Koneksi WiFi
+    ip = connect_wifi()
+    if ip is None:
+        ip = setup_ap()
+    
+    # Jalankan server
+    try:
+        run_server(ip)
+    finally:
+        # Matikan semua pompa saat keluar
+        for pump in pump_status:
+            set_pump(pump, False)
 
 if __name__ == "__main__":
     main()
